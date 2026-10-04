@@ -25,11 +25,11 @@ KindBridge coordinates citizen assistance requests, volunteer capacity, and AI-a
 
 ## 2. Authentication and identity
 
-- **Mechanism:** JWT in HttpOnly, Secure, SameSite=Lax cookies. Access token TTL 15 minutes; refresh token TTL 7 days (rotating). CSRF: double-submit cookie on mutating POST/PUT/PATCH/DELETE.
+- **Mechanism:** JWT in HttpOnly, Secure, SameSite=Lax cookies. Access token TTL 60 minutes; no refresh tokens in v1 (the user logs in again on expiry). CSRF: double-submit cookie on mutating POST/PUT/PATCH/DELETE.
 - **Password:** bcrypt (cost ≥ 12). Minimum 10 characters. No plaintext logs.
 - **RBAC:** every command and query checks `role` from JWT claims. Unauthorized → 401; forbidden → 403.
 - **Bootstrap:** first admin is created by a one-time seed (`ADMIN_BOOTSTRAP_EMAIL` in environment), not via public registration.
-- **Forgot-password:** out of scope for v1. Failed login lockout: 5 attempts / 15 minutes per email.
+- **Forgot-password:** out of scope for v1. Failed login lockout: 5 attempts / 15 minutes per email, tracked in a non-event-sourced `login_attempts` table.
 
 ### Personas
 
@@ -53,9 +53,9 @@ Skills are stored as `NVARCHAR(MAX)` JSON arrays (`["first_aid","driving"]`), no
 | :--- | :--- | :--- | :--- |
 | `id` | UNIQUEIDENTIFIER | PK | User id |
 | `email` | NVARCHAR(255) | UNIQUE, NOT NULL | Login identifier (normalized lower-case) |
-| `password_hash` | NVARCHAR(255) | NOT NULL | bcrypt hash |
+| `password_hash` | NVARCHAR(255) | NOT NULL | bcrypt hash; comes from the `CredentialSet` event |
 | `full_name` | NVARCHAR(200) | NOT NULL | Display name |
-| `phone` | NVARCHAR(30) | NOT NULL | Encrypted at rest (app-level) |
+| `phone` | NVARCHAR(30) | NOT NULL | Encrypted (app-level); stored encrypted in the `UserRegistered` payload |
 | `role` | NVARCHAR(20) | NOT NULL | `REQUESTER`, `VOLUNTEER`, `ADMIN` |
 | `is_active` | BIT | NOT NULL, default 1 | Soft disable |
 | `created_at` | DATETIME2 | NOT NULL | UTC |
@@ -104,9 +104,9 @@ Skills are stored as `NVARCHAR(MAX)` JSON arrays (`["first_aid","driving"]`), no
 
 **Availability rules**
 
-- `TEMPORARILY_UNAVAILABLE`: set by volunteer with `unavailable_until`. A Flask APScheduler job (or agent poll) sets status back to `AVAILABLE` when `now > unavailable_until`.
+- `TEMPORARILY_UNAVAILABLE`: set by volunteer with `unavailable_until`. No scheduler: eligibility is evaluated lazily, so `now >= unavailable_until` counts as available; the stored status is a display value.
 - `BUSY`: projection — `current_active_tasks >= max_active_tasks`.
-- `INACTIVE`: volunteer toggles, or 90 days with no profile update and no completed task. Agent skips `INACTIVE`.
+- `INACTIVE`: set by the volunteer toggle only in v1 (automatic 90-day inactivity is deferred). Agent skips `INACTIVE`.
 - Agent also skips if `has_vehicle = 0` and request `requires_vehicle = 1`.
 
 ### 3.4 `task_assignments`
@@ -118,9 +118,9 @@ Multiple rows per request (up to K proposals). At most **one** row in `ASSIGNED`
 | `id` | UNIQUEIDENTIFIER | PK | Assignment id |
 | `request_id` | UNIQUEIDENTIFIER | FK help_requests | Parent ticket |
 | `volunteer_id` | UNIQUEIDENTIFIER | FK volunteer_profiles | Candidate |
-| `ai_score` | DECIMAL(5,2) | 0.00–100.00 | KindBridge score |
-| `ai_rationale` | NVARCHAR(500) | NOT NULL | Short justification |
-| `rank_in_batch` | INT | NOT NULL | 1..K in this match_attempt |
+| `ai_score` | DECIMAL(5,2) | NULL, 0.00–100.00 | KindBridge score; NULL for a manual override |
+| `ai_rationale` | NVARCHAR(500) | NULL | Short justification; NULL for a manual override |
+| `rank_in_batch` | INT | NULL | 1..K in this match_attempt; NULL for a manual override |
 | `match_attempt` | INT | NOT NULL | Ties to request.match_attempt |
 | `approved_by` | UNIQUEIDENTIFIER | NULL, FK users | Dispatcher |
 | `status` | NVARCHAR(30) | NOT NULL | `PROPOSED`, `ASSIGNED`, `DECLINED`, `COMPLETED`, `SUPERSEDED` |
@@ -146,7 +146,7 @@ Permanent for v1 (no undelete UI). Creating a link while an assignment is `ASSIG
 
 ### 4.1 Help request status
 
-`PENDING_REVIEW` → `MATCH_PROPOSED` | `NO_MATCH` → `ASSIGNED` → `COMPLETED`  
+`PENDING_REVIEW` → `MATCH_PROPOSED` | `NO_MATCH`; `MATCH_PROPOSED` → `ASSIGNED` → `COMPLETED`; `NO_MATCH` → `PENDING_REVIEW` (retrigger) or `ASSIGNED` (override).  
 Any of `PENDING_REVIEW`, `MATCH_PROPOSED`, `NO_MATCH`, `ASSIGNED` → `CANCELLED`.
 
 ```mermaid
@@ -154,10 +154,11 @@ flowchart LR
   submit[SubmitHelpRequest] --> pending[PENDING_REVIEW]
   pending --> proposed[MATCH_PROPOSED]
   pending --> noMatch[NO_MATCH]
-  noMatch --> pending
+  noMatch -->|retrigger| pending
+  noMatch -->|override| assigned
   proposed -->|approve_or_override| assigned[ASSIGNED]
   proposed -->|reject| pending
-  proposed --> pending
+  proposed -->|retrigger| pending
   assigned --> done[COMPLETED]
   assigned --> pending
   pending --> cancelled[CANCELLED]
@@ -171,12 +172,12 @@ flowchart LR
 | — | `RegisterUserCommand` | `UserRegistered` | (user exists) | Role immutable after create |
 | — | `LoginCommand` | `UserLoggedIn` | — | Audit only; no domain status |
 | — | `SubmitHelpRequestCommand` | `HelpRequestCreated` | `PENDING_REVIEW` | Requester only; enqueue agent |
-| `PENDING_REVIEW` or `NO_MATCH` | `ProposeMatchCommand` | `MatchesProposed` | `MATCH_PROPOSED` | Agent only; writes 1..K `PROPOSED` rows; increments `match_attempt`; **excludes** volunteers `DECLINED` on this request and all `ExemptionLink` pairs. `SUPERSEDED` rows are leftover proposals, not a blacklist |
-| `PENDING_REVIEW` or retry | `ProposeMatchCommand` (empty pool) | `NoMatchFound` | `NO_MATCH` | Admin notified; no assignment rows |
+| `PENDING_REVIEW` | `ProposeMatchCommand` | `MatchesProposed` | `MATCH_PROPOSED` | Agent only; writes 1..K `PROPOSED` rows; increments `match_attempt`; **excludes** volunteers `DECLINED` on this request and all `ExemptionLink` pairs. `SUPERSEDED` rows are leftover proposals, not a blacklist |
+| `PENDING_REVIEW` | `ProposeMatchCommand` (empty pool) | `NoMatchFound` | `NO_MATCH` | Admin notified; no assignment rows |
 | `NO_MATCH` or `MATCH_PROPOSED` | `RetriggerMatchCommand` | `MatchRetriggered` | `PENDING_REVIEW` | Admin; previous `PROPOSED` → `SUPERSEDED` |
 | `MATCH_PROPOSED` | `ApproveAssignmentCommand` | `AssignmentApproved` | `ASSIGNED` | Admin; chosen assignment → `ASSIGNED`; sibling `PROPOSED` → `SUPERSEDED`; increment volunteer active count; Gmail notify volunteer; expose address/phone to that volunteer only |
 | `MATCH_PROPOSED` | `RejectAssignmentCommand` | `AssignmentsRejected` | `PENDING_REVIEW` | Admin; **all** current `PROPOSED` → `DECLINED` with reason; those volunteer ids blacklisted for **this request only**; re-queue agent |
-| `MATCH_PROPOSED` | `OverrideAssignmentCommand` | `AssignmentOverridden` | `ASSIGNED` | Admin picks a volunteer **not** in the proposed set (or any eligible); `override_reason` required; current `PROPOSED` → `SUPERSEDED`; capacity + notify |
+| `NO_MATCH` or `MATCH_PROPOSED` | `OverrideAssignmentCommand` | `AssignmentOverridden` | `ASSIGNED` | Admin picks a volunteer **not** in the proposed set (or any eligible); `override_reason` required; creates an `ASSIGNED` row with NULL score, rationale and rank; current `PROPOSED` → `SUPERSEDED`; capacity + notify |
 | `ASSIGNED` | `CompleteTaskCommand` | `TaskCompleted` | `COMPLETED` | Assigned volunteer only; decrement capacity; request terminal |
 | `ASSIGNED` | `ReleaseTaskCommand` | `TaskReleased` | `PENDING_REVIEW` | Assigned volunteer; assignment → `DECLINED`; volunteer blacklisted on this request; decrement capacity; re-queue |
 | Open states | `CancelRequestCommand` | `HelpRequestCancelled` | `CANCELLED` | Owner requester (or admin); if `ASSIGNED`, notify volunteer via Gmail and free capacity; open proposals → `SUPERSEDED` |

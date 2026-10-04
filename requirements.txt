@@ -1,0 +1,28 @@
+﻿# Web
+Flask>=3.0
+waitress
+python-dotenv
+
+# Security
+PyJWT
+bcrypt
+cryptography
+
+# Database
+pyodbc
+
+# Vector DB and embeddings
+chromadb
+openai
+# sentence-transformers   # only if using the local all-MiniLM-L6-v2 fallback (large download)
+
+# Agent, LLM, MCP
+langgraph
+deepagents
+langchain-openai
+langchain-ollama
+langchain-mcp-adapters
+mcp
+
+# Tests
+pytest

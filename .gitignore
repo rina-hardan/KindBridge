@@ -1,0 +1,28 @@
+﻿# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Vector DB data
+chroma_data/
+
+# Node (npx skills add / MCP tooling)
+node_modules/
+
+# Logs and OS files
+*.log
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/

@@ -1,15 +1,32 @@
 ---
-description: KindBridge CQRS, event sourcing, and testing invariants for all Python changes
-globs: **/*.py
+description: KindBridge architecture rules - CQRS, Event Sourcing, layering, tests
 alwaysApply: true
 ---
 
-# KindBridge implementation rule
+# KindBridge architecture rules
 
-- Mutating Flask routes must dispatch a Command handler. Do not INSERT/UPDATE domain tables from a controller.
-- Query handlers must not append to `event_store` and must not mutate projection tables.
-- After a successful command, append immutable events with `event_id`, `aggregate_id`, `aggregate_type`, `event_type`, `payload_json`, `version`, `created_at`. Use optimistic concurrency on `version`.
-- SQL access only through repository interfaces so Somee SQL Server can be swapped for LocalDB in tests.
-- New HTTP endpoints ship with tests: happy path and 401/403.
-- The matching agent runs as process `python -m agent.main`, not as a Flask thread in production.
-- Follow `docs/system-spec.md`, `docs/architecture.md`, `docs/event-sourcing.md`, and `docs/agent-and-mcp.md`. Product name is KindBridge (not AidSync).
+Product name is **KindBridge** (not AidSync). Before writing code, read the relevant specs in `docs/` (`system-spec.md`, `architecture.md`, `event-sourcing.md`, `agent-and-mcp.md`). If code and specs disagree, the specs win; update them first.
+
+## CQRS
+
+Mutating routes dispatch a Command through `app/commands/bus.py`. GET routes dispatch a Query handler from `app/queries/`. Queries never append to `event_store` or mutate projections.
+
+## Event Sourcing
+
+Immutable events include `event_id`, `aggregate_id`, `aggregate_type`, `event_type`, `payload_json`, `version`, `created_at`. Optimistic concurrency on `version` yields HTTP 409. Projections are rebuildable. Never put plaintext passwords in event payloads. Never log passwords or hashes.
+
+## Layering
+
+No SQL or business rules in controllers. `app/domain` must not import Flask, SQL, or Chroma. SQL only via repository interfaces, so SQL Server can be swapped for LocalDB in tests. Chroma and embeddings only via `app/infrastructure`. One command/query file per aggregate.
+
+## Agent
+
+Separate process: `python -m agent.main`. Writes only via `ProposeMatchCommand` on the same command bus. Never approves or assigns.
+
+## Tests
+
+Every new endpoint ships a happy-path test and a 401/403 test. Agent tests mock MCP and Chroma.
+
+## Secrets
+
+Env vars only. Never commit `.env`.

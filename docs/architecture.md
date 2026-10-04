@@ -6,14 +6,15 @@
 | :--- | :--- | :--- |
 | Web app | Python 3.11+, Flask 3, Jinja2 + JSON APIs | Course NFR 4; MVC views + CQRS handlers |
 | Relational DB | SQL Server on Somee.com | Course NFR 5/8 |
-| Vector DB | ChromaDB process (persistent directory or hosted) | NFR 6; SQL Server has no pgvector |
+| Vector DB | ChromaDB running as a **server (sidecar)**; clients connect over HTTP | NFR 6; SQL Server has no pgvector |
 | Embeddings | `text-embedding-3-small` (OpenAI) or local `all-MiniLM-L6-v2` fallback | Document which env var is set |
 | Agent | Separate OS process, Deep Agents / LangGraph-style graph | Course NFR 11; not inside a Flask worker |
-| MCP | Tavily Search, Gmail, plus two MCP-Studio tools | NFR 9–10 |
+| LLM | Ollama (Docker) or OpenAI via `LLM_PROVIDER` / `LLM_MODEL` | Course NFR 11; limited role, see agent-and-mcp.md 2.1 |
+| MCP | Tavily Search, Gmail, plus two MCP-Studio tools | NFR 9-10 |
 | Auth | JWT cookies | See system-spec |
 | VCS | GitHub | NFR 12 |
 
-Do not leave Chroma vs pgvector undecided in code.
+Do not leave Chroma vs pgvector undecided in code. The decision is Chroma.
 
 ```mermaid
 flowchart LR
@@ -24,8 +25,10 @@ flowchart LR
   eventStore[EventStore]
   projections[SqlProjections]
   agentProc[AgentProcess]
-  chroma[ChromaDB]
-  mcpExt[TavilyAndGmailMCP]
+  vectorInfra[VectorStoreClient]
+  chroma[ChromaServer]
+  mcpTavily[TavilyMCP]
+  mcpGmail[GmailMCP]
   mcpCustom[McpStudioTools]
   somee[SomeeSqlServer]
 
@@ -33,13 +36,16 @@ flowchart LR
   flaskMvc --> commands
   flaskMvc --> queries
   commands --> eventStore
+  commands --> vectorInfra
   eventStore --> projections
   queries --> projections
   eventStore --> somee
   projections --> somee
   agentProc --> commands
-  agentProc --> chroma
-  agentProc --> mcpExt
+  agentProc --> vectorInfra
+  vectorInfra --> chroma
+  agentProc --> mcpTavily
+  commands --> mcpGmail
   agentProc --> mcpCustom
 ```
 
@@ -49,53 +55,95 @@ flowchart LR
 
 Course NFR 7 and 8 together:
 
-- **MVC:** Flask blueprints = controllers. Jinja templates (and JSON serializers) = views. Domain + command/query handlers = model layer. Controllers never open SQL cursors.
-- **CQRS:** mutating HTTP routes dispatch a **Command**; GET routes dispatch a **Query**. Queries never append events.
+- **MVC:** Flask blueprints in `controllers/` = controllers. Jinja templates in `templates/` = views. `domain/` + command/query handlers = model layer. Controllers never open SQL cursors.
+- **CQRS:** mutating HTTP routes dispatch a **Command** through the command bus; GET routes dispatch a **Query**. Queries never append events.
 - **Event Sourcing:** every successful command appends one or more immutable events, then updates projections. Details: [event-sourcing.md](event-sourcing.md).
 
 ```text
 Browser / Jinja
     -> controllers/ (Flask blueprints)
-        -> commands/  -> event_store.append -> projectors/
-        -> queries/   -> read SQL projections only
+        -> commands/bus.py -> command handler
+              -> domain/ aggregate decides
+              -> repositories/event_store.append -> projections/projectors
+        -> queries/        -> read SQL projections only
 Background agent process
-    -> poll PENDING_REVIEW / NO_MATCH retrigger
-    -> MCP tools + Chroma RAG
+    -> poll requests with status = PENDING_REVIEW
+    -> MCP tools + Chroma RAG (via infrastructure/vector_store.py)
     -> ProposeMatchCommand (same command bus)
 ```
+
+### Layer responsibilities
+
+| Layer | Responsibility | Must not |
+| :--- | :--- | :--- |
+| `controllers/` | Parse HTTP, check JWT/CSRF/role, call bus or query, render template or JSON | Open SQL cursors, contain business rules |
+| `commands/` | One handler per command; load aggregate, call domain, append events; run post-commit side effects (Chroma upsert/delete, Gmail) | Read from projections for decisions that belong to the aggregate |
+| `queries/` | Read-only access to SQL projections | Append to `event_store`, mutate any table |
+| `domain/` | Aggregates, event classes, domain errors, invariants | Import Flask, SQL, or Chroma |
+| `projections/` | Update read-model tables from events; rebuild | Contain decision logic |
+| `repositories/` | Event store and SQL repositories behind interfaces | Leak SQL outside this layer |
+| `infrastructure/` | Chroma client and embeddings, shared by Flask and agent | Hold business rules |
+| `security/` | JWT, CSRF, bcrypt helpers | Touch the database |
 
 ### Folder layout
 
 ```text
 app/
   __init__.py                 # Flask factory
-  controllers/
+  config.py                   # reads environment variables
+  controllers/                # Flask blueprints (MVC controllers)
     auth_controller.py
     requests_controller.py
     admin_controller.py
     volunteer_controller.py
-  commands/
-    handlers.py
+  commands/                   # CQRS write side
+    bus.py                    # command bus (used by Flask and the agent)
     dtos.py
-  queries/
-    handlers.py
+    user_commands.py
+    request_commands.py
+    volunteer_commands.py
+  queries/                    # CQRS read side
+    request_queries.py
+    admin_queries.py
+    volunteer_queries.py
+  domain/                     # model layer
+    aggregates.py
+    events.py
+    errors.py
   projections/
     projectors.py
-  repositories/               # interfaces + SQL Server impl
-  views/                      # Jinja
-  templates/
+    rebuild.py                # python -m app.projections.rebuild
+  repositories/               # interfaces + SQL Server implementation
+    event_store.py
+  infrastructure/             # shared by Flask and agent
+    vector_store.py           # Chroma client (HTTP)
+    embeddings.py
+  security/                   # JWT, CSRF, bcrypt
+  templates/                  # Jinja views
+  static/
 agent/
-  main.py                     # process entry
+  __init__.py
+  main.py                     # process entry: python -m agent.main
   graph.py                    # Deep Agent graph
   tools_mcp.py
 mcp_tools/                    # MCP Studio exported tools
+  __init__.py
   calculate_travel_context.py
   check_volunteer_capacity.py
+db/
+  schema.sql                  # event_store + projection tables
+  seed.py                     # first admin + demo data
 tests/
 docs/
-.cursor/rules/
-.cursor/skills/
+.cursor/
+  rules/                      # kindbridge-cqrs.mdc
+  skills/                     # volunteer-semantic-matching/SKILL.md
+requirements.txt
+.env.example
+.gitignore
 ```
+
+Every Python package directory contains an `__init__.py`.
 
 ---
 
@@ -127,7 +175,7 @@ All mutating routes: CSRF + JWT. Prefix `/`.
 | POST | `/api/profile/availability` | VOLUNTEER | `SetVolunteerAvailabilityCommand` |
 | POST | `/api/exemptions` | ADMIN or volunteer | `CreateExemptionLinkCommand` |
 
-Agent does not call HTTP; it imports the command bus in-process or via a loopback that still goes through the handler (same invariants).
+The agent does not call HTTP; it imports the command bus in-process (or via a loopback that still goes through the handler), so the same invariants apply.
 
 ---
 
@@ -135,19 +183,20 @@ Agent does not call HTTP; it imports the command bus in-process or via a loopbac
 
 Three processes:
 
-1. **Flask** (Waitress/gunicorn-equivalent on Windows/Somee as required) — HTTP.
-2. **KindBridge agent** — `python -m agent.main`, poll interval **15 seconds**, `SELECT` requests in `PENDING_REVIEW` where `match_attempt` is stale or zero.
-3. **Chroma** — embedded in the agent process with on-disk persistence, or a sidecar.
+1. **Flask** (Waitress/gunicorn-equivalent on Windows/Somee as required): HTTP.
+2. **KindBridge agent**: `python -m agent.main`, poll interval **15 seconds**, `SELECT` requests with `status = 'PENDING_REVIEW'` (see [agent-and-mcp.md](agent-and-mcp.md) section 1).
+3. **Chroma**: runs as a sidecar server (`chroma run --path ./chroma_data`). Both Flask (upsert on profile update) and the agent (query) connect to it as clients through `app/infrastructure/vector_store.py`. Never let two processes write to the same local Chroma directory.
 
-SQL Server is remote (Somee). Secrets only in environment: `DATABASE_URL`, `JWT_SECRET`, `OPENAI_API_KEY`, `TAVILY_API_KEY`, `GMAIL_MCP_*`, `ADMIN_BOOTSTRAP_EMAIL`.
+SQL Server is remote (Somee). Secrets only in environment: `DATABASE_URL`, `JWT_SECRET`, `OPENAI_API_KEY`, `TAVILY_API_KEY`, `GMAIL_MCP_*`, `CHROMA_HOST`, `CHROMA_PORT`, `LLM_PROVIDER`, `LLM_MODEL`, `OLLAMA_BASE_URL`, `ADMIN_BOOTSTRAP_EMAIL`. Provide `.env.example` without real values; `.env` and `chroma_data/` are in `.gitignore`.
 
 ### Failure policy
 
 | Failure | Behavior |
 | :--- | :--- |
 | Tavily timeout/error | Continue scoring with travel tool + RAG only; rationale notes `web_lookup=skipped`; do not fail the whole match |
-| No eligible volunteers | `NoMatchFound` → `NO_MATCH` |
-| Embedding API down | Retry 3× exponential backoff; leave ticket `PENDING_REVIEW`; log `embedding_failed` |
+| No eligible volunteers | `NoMatchFound` -> `NO_MATCH` |
+| Embedding API down | Retry 3x exponential backoff; leave ticket `PENDING_REVIEW`; log `embedding_failed` |
+| Chroma server down | Profile save still commits the event; vector upsert is retried; agent leaves ticket `PENDING_REVIEW` and logs `vector_store_unavailable` |
 | Gmail MCP down | Assignment still commits; enqueue `NotificationPending` projection for retry |
 | Agent crash mid-batch | Idempotency key `(request_id, match_attempt)`; duplicate Propose is a no-op |
 
@@ -155,6 +204,6 @@ SQL Server is remote (Somee). Secrets only in environment: `DATABASE_URL`, `JWT_
 
 ## 5. Command and query lists
 
-See [system-spec.md](system-spec.md) section 5. Handlers live under `app/commands` and `app/queries`.
+See [system-spec.md](system-spec.md) section 5. Handlers live under `app/commands` (one file per aggregate) and `app/queries`.
 
 Agent-specific design: [agent-and-mcp.md](agent-and-mcp.md).

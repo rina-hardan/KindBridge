@@ -20,17 +20,38 @@ For each row, dispatch `ProposeMatchCommand` **once** per `match_attempt` using 
 
 Implementation: Deep Agents (LangChain) or equivalent LangGraph supervisor with sub-agents. Nodes:
 
-1. **Load** — request projection + required skills.
-2. **Retrieve (RAG)** — embed request `description + category + required_skills`; query Chroma collection `volunteer_resumes`, `top_n = 15`.
-3. **Hard filter** — drop INACTIVE, TEMPORARILY_UNAVAILABLE (until), BUSY/capacity, missing vehicle, exemption, already DECLINED on this request, same person as requester.
-4. **Capacity tool (MCP Studio)** — `CheckVolunteerCapacityTool`.
-5. **Travel tool (MCP Studio)** — `CalculateTravelContextTool`.
-6. **Web (Tavily MCP)** — city-level context (weather disruption, transit strike, municipal holiday). Timeout 8s; on failure skip.
-7. **Score & write** — rank remaining; take **K = 3**; if zero → `NoMatchFound`; else `MatchesProposed`.
+1. **Load**: request projection + required skills.
+2. **Retrieve (RAG)**: embed request `description + category + required_skills`; query Chroma collection `volunteer_resumes`, `top_n = 15`.
+3. **Hard filter**: drop INACTIVE, TEMPORARILY_UNAVAILABLE (until), BUSY/capacity, missing vehicle, exemption, already DECLINED on this request, same person as requester.
+4. **Capacity tool (MCP Studio)**: `CheckVolunteerCapacityTool`.
+5. **Travel tool (MCP Studio)**: `CalculateTravelContextTool`.
+6. **Web (Tavily MCP)**: city-level context (weather disruption, transit strike, municipal holiday). Timeout 8s; on failure skip.
+7. **Score & write**: rank remaining; take **K = 3**; if zero -> `NoMatchFound`; else `MatchesProposed`.
 
 HITL: graph **stops** after writing proposals. Approve/reject is only HTTP/admin.
 
-## 3. Score formula (`ai_score` 0–100)
+### 2.1 LLM role and model
+
+The score is computed by deterministic code (section 3), never by the LLM. The LLM is used for exactly two things:
+
+1. Interpret the Tavily result and return `unsafe_travel: true|false` (structured JSON output).
+2. Write the `ai_rationale` text (max 500 chars) from the already-computed score components.
+
+The LLM never ranks candidates, never changes a score, and never dispatches commands; the graph does.
+
+Model configuration (environment variables, documented in `.env.example`):
+
+| Variable | Meaning |
+| :--- | :--- |
+| `LLM_PROVIDER` | `openai` or `ollama` |
+| `LLM_MODEL` | Model name for the chosen provider |
+| `OLLAMA_BASE_URL` | Only for `ollama` (for example a Docker container); default `http://localhost:11434` |
+
+The chosen provider and model must be written in the project `README.md`.
+
+If the LLM call fails or exceeds 10s: use a template rationale (top two score components + travel summary) and `unsafe_travel = false`. A failed LLM call never blocks proposals.
+
+## 3. Score formula (`ai_score` 0-100)
 
 ```
 score = 100 * (
@@ -43,13 +64,13 @@ score = 100 * (
 )
 ```
 
-If `preferred_date` < today: multiply by `0.85`. Rationale ≤ 500 chars: top two score components + travel summary + `web_lookup=ok|skipped`.
+If `preferred_date` < today: multiply by `0.85`. Rationale <= 500 chars: top two score components + travel summary + `web_lookup=ok|skipped`.
 
 ## 4. Vector upsert
 
 Collection `volunteer_resumes`: id = `volunteer_profile.id`, document = `experience + " " + skills_json`, metadata = `{user_id, primary_city, has_vehicle}`.
 
-On `VolunteerProfileUpdated`: upsert. On deactivate: delete vector.
+On `VolunteerProfileUpdated`: upsert. On deactivate: delete vector. Access only through `app/infrastructure/vector_store.py`.
 
 ## 5. MCP Studio tools (NFR 10)
 
@@ -97,5 +118,5 @@ Overlap: if both the new request and an ASSIGNED task have `resource_type = PHYS
 
 ## 6. External MCP (NFR 9)
 
-- **Tavily:** search query `"{request_city} transit disruption OR municipal emergency {today_iso}"`. Used only as context in rationale, not as a hard filter unless the model flags `unsafe_travel` (then feasibility *= 0.5).
-- **Gmail:** send on `AssignmentApproved`, `AssignmentOverridden`, `HelpRequestCancelled` (if volunteer was assigned), `TaskReleased` (notify admin). Failures are retried; they do not roll back events.
+- **Tavily:** search query `"{request_city} transit disruption OR municipal emergency {today_iso}"`. Used only as context in rationale, not as a hard filter unless the LLM flags `unsafe_travel` (then feasibility *= 0.5).
+- **Gmail:** send on `AssignmentApproved`, `AssignmentOverridden`, `HelpRequestCancelled` (if volunteer was assigned), `TaskReleased` (notify admin). These events are produced by HTTP commands, so notifications are sent by the command side (Flask process), not by the agent. Failures are retried; they do not roll back events.
