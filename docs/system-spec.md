@@ -117,7 +117,7 @@ Optional 1:1 extension. Holds data that repeats across a person's requests, so t
 | `primary_city` | NVARCHAR(100) | Indexed, NOT NULL | Home municipality |
 | `has_vehicle` | BIT | NOT NULL, default 0 | Transport available |
 | `skills_json` | NVARCHAR(MAX) | NOT NULL | JSON string array |
-| `experience` | NVARCHAR(MAX) | NOT NULL | Resume narrative |
+| `experience` | NVARCHAR(MAX) | NOT NULL | Resume narrative (free-text or extracted from optional uploaded file) | 
 | `base_frequency` | NVARCHAR(30) | NOT NULL | `WEEKLY`, `BIWEEKLY`, `MONTHLY`, `ON_DEMAND` (one-off / as needed). **Soft** score bonus, never a hard filter |
 | `availability_status` | NVARCHAR(30) | NOT NULL, default `AVAILABLE` | Stored values: `AVAILABLE`, `INACTIVE`. See availability rules |
 | `max_active_tasks` | INT | NOT NULL, default 1 | **[CHANGED]** Cap for `EXCLUSIVE` tasks |
