@@ -10,6 +10,7 @@ cryptography
 
 # Database
 pyodbc
+sqlalchemy
 
 # Vector DB and embeddings
 chromadb
