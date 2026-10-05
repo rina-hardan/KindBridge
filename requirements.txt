@@ -14,7 +14,7 @@ pyodbc
 # Vector DB and embeddings
 chromadb
 openai
-# sentence-transformers   # only if using the local all-MiniLM-L6-v2 fallback (large download)
+sentence-transformers    # Active and required for local embeddings
 
 # Agent, LLM, MCP
 langgraph
