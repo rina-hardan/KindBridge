@@ -15,7 +15,7 @@ Follow this skill whenever you implement or change `ProposeMatchCommand`, `agent
 - id = `volunteer_profile.id`.
 - document = `experience + " " + skills_json`.
 - metadata = `{user_id, primary_city, has_vehicle}`.
-- Upsert on `VolunteerProfileUpdated`; delete the vector when the volunteer is deactivated.
+- Upsert on `VolunteerProfileEnabled` and `VolunteerProfileUpdated`; delete the vector when the volunteer is deactivated.
 - Access Chroma only through `app/infrastructure/vector_store.py`.
 
 ## 2. Matching flow (one request, one match_attempt)

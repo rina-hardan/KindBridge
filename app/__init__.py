@@ -11,6 +11,7 @@ from app.commands.user_commands import Clock, UserCommandHandlers, utc_now
 from app.config import Config
 from app.controllers.auth_controller import auth_bp
 from app.controllers.errors import register_error_handlers
+from app.infrastructure.vector_store import ChromaVolunteerVectorStore, NullResumeIndex, ResumeVectorStore
 from app.projections.projectors import UserProjector
 from app.repositories.db import make_engine
 from app.repositories.event_store import SqlEventStore
@@ -29,11 +30,23 @@ class Services:
     event_store: SqlEventStore
     bus: CommandBus
     tokens: TokenService
+    resumes: ResumeVectorStore
 
 
-def build_services(config: Config, engine: Engine | None = None, clock: Clock = utc_now) -> Services:
+def build_services(
+    config: Config,
+    engine: Engine | None = None,
+    clock: Clock = utc_now,
+    resumes: ResumeVectorStore | None = None,
+) -> Services:
     engine = engine or make_engine(config.database_url)
     event_store = SqlEventStore(config.database_url, engine=engine)
+    if resumes is None:
+        resumes = (
+            NullResumeIndex()
+            if config.testing
+            else ChromaVolunteerVectorStore(config.chroma_host, config.chroma_port)
+        )
     bus = CommandBus(event_store)
     UserCommandHandlers(
         engine=engine,
@@ -45,7 +58,9 @@ def build_services(config: Config, engine: Engine | None = None, clock: Clock = 
         encryptor=FieldEncryptor(config.encryption_key),
         lockout_max_failures=config.lockout_max_failures,
         lockout_window=timedelta(minutes=config.lockout_window_minutes),
+        resumes=resumes,
         clock=clock,
+        resume_retry_delays=() if config.testing else (0.5, 1.0),
     ).register_on(bus)
     return Services(
         config=config,
@@ -53,16 +68,22 @@ def build_services(config: Config, engine: Engine | None = None, clock: Clock = 
         event_store=event_store,
         bus=bus,
         tokens=TokenService(config.jwt_secret, config.jwt_ttl_minutes),
+        resumes=resumes,
     )
 
 
-def create_app(config: Config | None = None, engine: Engine | None = None, clock: Clock = utc_now) -> Flask:
+def create_app(
+    config: Config | None = None,
+    engine: Engine | None = None,
+    clock: Clock = utc_now,
+    resumes: ResumeVectorStore | None = None,
+) -> Flask:
     """Build the KindBridge web app. Flask CLI calls this with no arguments."""
     config = config or Config.from_env()
     app = Flask(__name__)
     app.config["TESTING"] = config.testing
     app.json.ensure_ascii = False
-    app.extensions["kindbridge"] = build_services(config, engine, clock)
+    app.extensions["kindbridge"] = build_services(config, engine, clock, resumes)
 
     register_error_handlers(app)
     _install_csrf(app, config)

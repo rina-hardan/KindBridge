@@ -35,14 +35,18 @@ Optimistic concurrency: insert with `version = last + 1`; unique `(aggregate_id,
 
 ### User
 
-- `UserRegistered`: email, role, full_name, `phone_encrypted` (encrypted before it enters the payload).
-- `CredentialSet`: `password_hash` (bcrypt). Stored in the event store because projections must be rebuildable; redacted in any log or debug dump.
+- `UserRegistered`: `email`, `full_name`, `phone_encrypted` (encrypted before it enters the payload). No `role` field. Public registration never sets `is_admin`; roles are derived from `is_admin` and an enabled volunteer profile.
+- `CredentialSet`: `password_hash` (bcrypt). Appended on the same User stream immediately after `UserRegistered`. Stored in the event store because projections must be rebuildable; redacted in any log or debug dump.
+- `AdminBootstrapped`: empty payload. Appended only by the one-time admin seed, after `UserRegistered` and `CredentialSet`. The projector sets `users.is_admin = 1`. Public registration never emits this event, and admin status is never granted or removed through the app.
+- `VolunteerProfileEnabled`: appended on the User stream when registration includes a volunteer profile. Payload: `profile_id`, `primary_city`, `has_vehicle`, `skills`, `experience`, `base_frequency`, `max_active_tasks`, `max_parallel_tasks`. The projector inserts `volunteer_profiles` with `is_enabled = 1` and `availability_status = AVAILABLE`. After the transaction commits, upsert the résumé into Chroma (`experience` + space + `skills_json`). A Chroma failure does not roll the event back.
 - `UserLoggedIn`: audit.
 - `UserDeactivated`.
 
 Never put a plaintext password in any payload. Password hashes must not appear in logs.
 
 ### VolunteerProfile
+
+The first enable is `VolunteerProfileEnabled` on the User stream (see above), not a separate aggregate.
 
 - `VolunteerProfileUpdated`: skills, experience, city, vehicle, frequency. **Triggers Chroma upsert** (post-commit side effect).
 - `VolunteerAvailabilityChanged`: status, unavailable_until. When the new status is `INACTIVE`, delete the volunteer vector from Chroma (post-commit side effect).
@@ -79,4 +83,4 @@ If a stream exceeds 200 events, write `snapshots(aggregate_id, version, state_js
 
 ## 6. What is not Event Sourcing
 
-JWT sessions, CSRF secrets, and Chroma vectors are **not** event-sourced. The vector upsert is a post-commit side effect of `VolunteerProfileUpdated`; the volunteer résumé is the corpus. Request text (`HelpRequestCreated`) is embedded only at query time by the agent and is not stored in Chroma.
+JWT sessions, CSRF secrets, and Chroma vectors are **not** event-sourced. The vector upsert is a post-commit side effect of `VolunteerProfileEnabled` and `VolunteerProfileUpdated`; the volunteer résumé is the corpus. Request text (`HelpRequestCreated`) is embedded only at query time by the agent and is not stored in Chroma.

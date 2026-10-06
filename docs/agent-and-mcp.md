@@ -70,7 +70,7 @@ If `preferred_date` < today: multiply by `0.85`. Rationale <= 500 chars: top two
 
 Collection `volunteer_resumes`: id = `volunteer_profile.id`, document = `experience + " " + skills_json`, metadata = `{user_id, primary_city, has_vehicle}`.
 
-On `VolunteerProfileUpdated`: upsert. On deactivate: delete vector. Access only through `app/infrastructure/vector_store.py`.
+On `VolunteerProfileEnabled` and `VolunteerProfileUpdated`: upsert. On deactivate: delete vector. Access only through `app/infrastructure/vector_store.py`.
 
 ## 5. MCP Studio tools (NFR 10)
 

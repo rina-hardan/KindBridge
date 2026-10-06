@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app import create_app
@@ -13,11 +14,13 @@ from app.config import load_settings
 from app.domain.aggregates import HelpRequest, User
 from app.domain.errors import ConcurrencyConflict, Forbidden, Unauthorized
 from app.domain.events import DomainEvent
+from app.projections.projectors import UserProjector
 from app.repositories.event_store import (
     InMemoryEventStore,
     SqlEventStore,
     is_aggregate_version_conflict,
 )
+from app.repositories.tables import users
 from tests.conftest import csrf_post
 
 
@@ -152,6 +155,25 @@ def test_commit_conflict_leaves_events_uncommitted():
     with pytest.raises(ConcurrencyConflict):
         bus.commit(stale)
     assert len(stale.uncommitted_events()) == 1
+
+
+def test_commit_passes_events_then_connection_to_the_projector(engine):
+    store = SqlEventStore(engine=engine)
+    bus = CommandBus(store)
+    user = _registered()
+    user.raise_event("CredentialSet", {"password_hash": "hashed"})
+
+    created_at = user.uncommitted_events()[0].created_at
+    bus.commit(user, projector=UserProjector())
+
+    with engine.connect() as conn:
+        row = conn.execute(select(users)).one()
+    assert row.created_at.tzinfo is None
+    assert row.created_at == created_at.astimezone(timezone.utc).replace(tzinfo=None)
+    assert row.email == "ada@kindbridge.org"
+    assert row.full_name == "Ada"
+    assert row.password_hash == "hashed"
+    assert store.load_stream(user.aggregate_id)[1].event_type == "CredentialSet"
 
 
 def test_projector_failure_does_not_append():

@@ -3,8 +3,20 @@
 -- File: db/schema.sql
 -- ===================================================
 
--- 1. Event Store (Source of Truth - CQRS / Event Sourcing)
+-- Drop dependents before the tables they reference.
+-- SQL Server refuses DROP TABLE while an incoming FK is still active.
+IF OBJECT_ID('dbo.task_assignments', 'U') IS NOT NULL DROP TABLE dbo.task_assignments;
+IF OBJECT_ID('dbo.volunteer_unavailability', 'U') IS NOT NULL DROP TABLE dbo.volunteer_unavailability;
+IF OBJECT_ID('dbo.help_requests', 'U') IS NOT NULL DROP TABLE dbo.help_requests;
+IF OBJECT_ID('dbo.request_series', 'U') IS NOT NULL DROP TABLE dbo.request_series;
+IF OBJECT_ID('dbo.exemption_links', 'U') IS NOT NULL DROP TABLE dbo.exemption_links;
+IF OBJECT_ID('dbo.requester_profiles', 'U') IS NOT NULL DROP TABLE dbo.requester_profiles;
+IF OBJECT_ID('dbo.volunteer_profiles', 'U') IS NOT NULL DROP TABLE dbo.volunteer_profiles;
+IF OBJECT_ID('dbo.users', 'U') IS NOT NULL DROP TABLE dbo.users;
 IF OBJECT_ID('dbo.event_store', 'U') IS NOT NULL DROP TABLE dbo.event_store;
+IF OBJECT_ID('dbo.login_attempts', 'U') IS NOT NULL DROP TABLE dbo.login_attempts;
+
+-- 1. Event Store (Source of Truth - CQRS / Event Sourcing)
 CREATE TABLE dbo.event_store (
     seq BIGINT IDENTITY(1,1) NOT NULL,
     event_id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWSEQUENTIALID(),
@@ -22,7 +34,6 @@ CREATE UNIQUE INDEX IX_event_store_seq ON dbo.event_store(seq);
 CREATE INDEX IX_event_store_aggregate_id ON dbo.event_store(aggregate_id);
 
 -- 2. Users (Core Identity)
-IF OBJECT_ID('dbo.users', 'U') IS NOT NULL DROP TABLE dbo.users;
 CREATE TABLE dbo.users (
     id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWSEQUENTIALID(),
     email NVARCHAR(255) NOT NULL UNIQUE,
@@ -35,7 +46,6 @@ CREATE TABLE dbo.users (
 );
 
 -- 3. Requester Profiles (1:1 Extension for Requesters)
-IF OBJECT_ID('dbo.requester_profiles', 'U') IS NOT NULL DROP TABLE dbo.requester_profiles;
 CREATE TABLE dbo.requester_profiles (
     id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWSEQUENTIALID(),
     user_id UNIQUEIDENTIFIER NOT NULL UNIQUE FOREIGN KEY REFERENCES dbo.users(id) ON DELETE CASCADE,
@@ -48,7 +58,6 @@ CREATE TABLE dbo.requester_profiles (
 );
 
 -- 4. Volunteer Profiles (1:1 Extension for Volunteers)
-IF OBJECT_ID('dbo.volunteer_profiles', 'U') IS NOT NULL DROP TABLE dbo.volunteer_profiles;
 CREATE TABLE dbo.volunteer_profiles (
     id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWSEQUENTIALID(),
     user_id UNIQUEIDENTIFIER NOT NULL UNIQUE FOREIGN KEY REFERENCES dbo.users(id) ON DELETE CASCADE,
@@ -67,7 +76,6 @@ CREATE TABLE dbo.volunteer_profiles (
 CREATE INDEX IX_volunteer_profiles_primary_city ON dbo.volunteer_profiles(primary_city);
 
 -- 5. Volunteer Unavailability Periods
-IF OBJECT_ID('dbo.volunteer_unavailability', 'U') IS NOT NULL DROP TABLE dbo.volunteer_unavailability;
 CREATE TABLE dbo.volunteer_unavailability (
     id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWSEQUENTIALID(),
     volunteer_id UNIQUEIDENTIFIER NOT NULL FOREIGN KEY REFERENCES dbo.volunteer_profiles(id) ON DELETE CASCADE,
@@ -79,7 +87,6 @@ CREATE TABLE dbo.volunteer_unavailability (
 );
 
 -- 6. Request Series (Deferred / Reserved for Recurring Requests)
-IF OBJECT_ID('dbo.request_series', 'U') IS NOT NULL DROP TABLE dbo.request_series;
 CREATE TABLE dbo.request_series (
     id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWSEQUENTIALID(),
     requester_id UNIQUEIDENTIFIER NOT NULL FOREIGN KEY REFERENCES dbo.users(id),
@@ -91,7 +98,6 @@ CREATE TABLE dbo.request_series (
 );
 
 -- 7. Help Requests
-IF OBJECT_ID('dbo.help_requests', 'U') IS NOT NULL DROP TABLE dbo.help_requests;
 CREATE TABLE dbo.help_requests (
     id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWSEQUENTIALID(),
     requester_id UNIQUEIDENTIFIER NOT NULL FOREIGN KEY REFERENCES dbo.users(id),
@@ -117,7 +123,6 @@ CREATE INDEX IX_help_requests_status ON dbo.help_requests(status);
 CREATE INDEX IX_help_requests_city ON dbo.help_requests(city);
 
 -- 8. Task Assignments
-IF OBJECT_ID('dbo.task_assignments', 'U') IS NOT NULL DROP TABLE dbo.task_assignments;
 CREATE TABLE dbo.task_assignments (
     id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWSEQUENTIALID(),
     request_id UNIQUEIDENTIFIER NOT NULL FOREIGN KEY REFERENCES dbo.help_requests(id) ON DELETE CASCADE,
@@ -134,7 +139,6 @@ CREATE TABLE dbo.task_assignments (
 );
 
 -- 9. Exemption Links (Mutual Exclusions)
-IF OBJECT_ID('dbo.exemption_links', 'U') IS NOT NULL DROP TABLE dbo.exemption_links;
 CREATE TABLE dbo.exemption_links (
     volunteer_id UNIQUEIDENTIFIER NOT NULL FOREIGN KEY REFERENCES dbo.users(id),
     requester_id UNIQUEIDENTIFIER NOT NULL FOREIGN KEY REFERENCES dbo.users(id),
@@ -145,7 +149,6 @@ CREATE TABLE dbo.exemption_links (
 );
 
 -- 10. Login Attempts (Rate Limiting & Security Audit)
-IF OBJECT_ID('dbo.login_attempts', 'U') IS NOT NULL DROP TABLE dbo.login_attempts;
 CREATE TABLE dbo.login_attempts (
     id BIGINT IDENTITY(1,1) PRIMARY KEY,
     email NVARCHAR(255) NOT NULL,

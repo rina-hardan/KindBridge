@@ -75,6 +75,8 @@ class Config:
     lockout_max_failures: int = 5
     lockout_window_minutes: int = 15
     testing: bool = False
+    chroma_host: str = "localhost"
+    chroma_port: int = 8000
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -111,4 +113,6 @@ class Config:
             jwt_ttl_minutes=int(os.getenv("JWT_ACCESS_TTL_MINUTES", 60)),
             bcrypt_rounds=bcrypt_rounds,
             cookie_secure=os.getenv("COOKIE_SECURE", "true").lower() != "false",
+            chroma_host=os.getenv("CHROMA_HOST", "localhost").strip() or "localhost",
+            chroma_port=int(os.getenv("CHROMA_PORT", "8000")),
         )

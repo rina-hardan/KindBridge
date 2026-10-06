@@ -1,5 +1,8 @@
 import json
 import uuid
+from collections.abc import Sequence
+from datetime import datetime, timezone
+from typing import Any
 
 from sqlalchemy import Connection, insert, update
 
@@ -8,8 +11,19 @@ from app.domain.events import DomainEvent
 from app.repositories.tables import users, volunteer_profiles
 
 
+def _naive_utc(value: datetime) -> datetime:
+    """DATETIME2 cannot store tzinfo. Keep the UTC clock time and drop the zone."""
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
 class UserProjector:
-    """Builds the users and volunteer_profiles read models from User-stream events."""
+    """Builds the users and volunteer_profiles read models from User-stream events.
+
+    ``apply(events, connection)`` matches ``EventStore.append`` and
+    ``CommandBus.commit``, so a handler can pass the instance as ``projector=``.
+    """
 
     def __init__(self) -> None:
         self._handlers = {
@@ -19,11 +33,14 @@ class UserProjector:
             ev.VOLUNTEER_PROFILE_ENABLED: self._on_VolunteerProfileEnabled,
         }
 
-    def apply(self, conn: Connection, events: list[DomainEvent]) -> None:
+    def __call__(self, events: Sequence[DomainEvent], connection: Any) -> None:
+        self.apply(events, connection)
+
+    def apply(self, events: Sequence[DomainEvent], connection: Connection) -> None:
         for event in events:
             handler = self._handlers.get(event.event_type)
             if handler is not None:
-                handler(conn, event)
+                handler(connection, event)
 
     def _on_UserRegistered(self, conn: Connection, event: DomainEvent) -> None:
         conn.execute(
@@ -35,7 +52,7 @@ class UserProjector:
                 phone=event.payload["phone_encrypted"],
                 is_admin=False,
                 is_active=True,
-                created_at=event.created_at,
+                created_at=_naive_utc(event.created_at),
             )
         )
 

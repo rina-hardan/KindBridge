@@ -1,9 +1,17 @@
 import os
+import sys
+
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 
 # Locate the db directory and load .env from the parent directory
 base_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.abspath(os.path.join(base_dir, ".."))
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
+
+from app.repositories.db import make_engine
+
 env_path = os.path.join(base_dir, "..", ".env")
 load_dotenv(dotenv_path=env_path)
 
@@ -15,7 +23,7 @@ if not db_url:
 print("Checking database connection on Somee from the db directory...")
 
 try:
-    engine = create_engine(db_url)
+    engine = make_engine(db_url)
     with engine.connect() as connection:
         # Fetch the list of existing tables
         result = connection.execute(
