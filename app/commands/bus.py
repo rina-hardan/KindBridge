@@ -16,7 +16,7 @@ class Command:
     """Marker for a write-side request. One handler is registered per subclass."""
 
 
-class CommandHandlerNotFound(Exception):
+class CommandHandlerNotFound(LookupError):
     def __init__(self, command_name: str) -> None:
         super().__init__(f"no handler registered for {command_name}")
         self.command_name = command_name

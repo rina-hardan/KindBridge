@@ -8,8 +8,17 @@ from datetime import date, datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
+USER_AGGREGATE = "User"
+
+USER_REGISTERED = "UserRegistered"
+CREDENTIAL_SET = "CredentialSet"
+ADMIN_BOOTSTRAPPED = "AdminBootstrapped"
+VOLUNTEER_PROFILE_ENABLED = "VolunteerProfileEnabled"
+USER_LOGGED_IN = "UserLoggedIn"
+
 _PLAINTEXT_PASSWORD_KEYS = frozenset({"password", "plain_password", "plaintext_password"})
-_REDACTED_KEYS = _PLAINTEXT_PASSWORD_KEYS | frozenset({"password_hash"})
+# Payload keys that must never be written to logs or debug output.
+SENSITIVE_PAYLOAD_KEYS = _PLAINTEXT_PASSWORD_KEYS | frozenset({"password_hash", "phone_encrypted"})
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -30,7 +39,7 @@ def redact_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
     """Copy a payload with password material removed, for logs and debug output."""
     redacted: dict[str, Any] = {}
     for key, value in payload.items():
-        if key.lower() in _REDACTED_KEYS:
+        if key.lower() in SENSITIVE_PAYLOAD_KEYS:
             redacted[key] = "***"
         elif isinstance(value, dict):
             redacted[key] = redact_payload(value)
@@ -102,10 +111,13 @@ class DomainEvent:
         object.__setattr__(self, "payload", payload)
         object.__setattr__(self, "created_at", _as_utc(self.created_at))
 
+    def redacted_payload(self) -> dict[str, Any]:
+        return redact_payload(self.payload)
+
     def __repr__(self) -> str:
         return (
             f"DomainEvent(event_type={self.event_type!r}, aggregate_id={self.aggregate_id}, "
-            f"version={self.version}, payload={redact_payload(self.payload)!r})"
+            f"version={self.version}, payload={self.redacted_payload()!r})"
         )
 
     def to_row(self) -> dict[str, Any]:

@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Log in · KindBridge{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-12 col-sm-9 col-md-6 col-lg-4">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body p-4">
+        <h1 class="h4 mb-4">Log in</h1>
+        <div id="form-error" class="alert alert-danger d-none" role="alert"></div>
+        <form id="login-form" novalidate>
+          <div class="mb-3">
+            <label for="email" class="form-label">Email</label>
+            <input id="email" name="email" type="email" class="form-control" autocomplete="username" required>
+            <div class="invalid-feedback" data-field="email"></div>
+          </div>
+          <div class="mb-4">
+            <label for="password" class="form-label">Password</label>
+            <input id="password" name="password" type="password" class="form-control" autocomplete="current-password" required>
+            <div class="invalid-feedback" data-field="password"></div>
+          </div>
+          <button type="submit" class="btn btn-kb w-100">Log in</button>
+        </form>
+        <p class="mt-4 mb-0 text-center small">
+          New to KindBridge? <a href="{{ url_for('auth.register_page') }}">Create an account</a>
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  KB.bindForm("login-form", "/api/auth/login", (form) => ({
+    email: form.email.value,
+    password: form.password.value,
+  }), () => { window.location.href = "/me"; });
+</script>
+{% endblock %}

@@ -2,11 +2,18 @@
 
 import os
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
+from cryptography.fernet import Fernet
 from dotenv import load_dotenv
 
-_REQUIRED_PRODUCTION = ("DATABASE_URL", "JWT_SECRET")
+MIN_BCRYPT_ROUNDS = 12
+MIN_JWT_SECRET_LENGTH = 32
+
+
+class ConfigError(RuntimeError):
+    pass
 
 
 def _get(environ: Mapping[str, str], name: str, default: str = "") -> str:
@@ -28,9 +35,9 @@ def load_settings(environ: Mapping[str, str] | None = None) -> dict[str, Any]:
         environ = os.environ
 
     jwt_secret = _get(environ, "JWT_SECRET")
-    bcrypt_rounds = _int_setting(environ, "BCRYPT_ROUNDS", 12)
-    if bcrypt_rounds < 12:
-        bcrypt_rounds = 12
+    bcrypt_rounds = _int_setting(environ, "BCRYPT_ROUNDS", MIN_BCRYPT_ROUNDS)
+    if bcrypt_rounds < MIN_BCRYPT_ROUNDS:
+        bcrypt_rounds = MIN_BCRYPT_ROUNDS
 
     return {
         "TESTING": False,
@@ -55,15 +62,53 @@ def load_settings(environ: Mapping[str, str] | None = None) -> dict[str, Any]:
     }
 
 
+@dataclass(frozen=True)
 class Config:
-    """Flask config object. Attributes are filled from the environment at import."""
+    """Validated settings the web app needs to start."""
 
-    TESTING = False
+    database_url: str
+    jwt_secret: str
+    encryption_key: str
+    jwt_ttl_minutes: int = 60
+    bcrypt_rounds: int = MIN_BCRYPT_ROUNDS
+    cookie_secure: bool = True
+    lockout_max_failures: int = 5
+    lockout_window_minutes: int = 15
+    testing: bool = False
 
+    @classmethod
+    def from_env(cls) -> "Config":
+        load_dotenv()
 
-for _name, _value in load_settings().items():
-    setattr(Config, _name, _value)
+        def required(name: str) -> str:
+            value = os.getenv(name, "").strip()
+            if not value:
+                raise ConfigError(f"Environment variable {name} is required")
+            return value
 
+        database_url = required("DATABASE_URL")
+        jwt_secret = required("JWT_SECRET")
+        if len(jwt_secret) < MIN_JWT_SECRET_LENGTH:
+            raise ConfigError(f"JWT_SECRET must be at least {MIN_JWT_SECRET_LENGTH} characters")
 
-def missing_production_settings(settings: Mapping[str, Any]) -> list[str]:
-    return [name for name in _REQUIRED_PRODUCTION if not settings.get(name)]
+        encryption_key = required("ENCRYPTION_KEY")
+        try:
+            Fernet(encryption_key.encode("ascii"))
+        except (ValueError, UnicodeEncodeError) as exc:
+            raise ConfigError(
+                "ENCRYPTION_KEY is not a valid Fernet key. Generate one with: "
+                'py -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
+            ) from exc
+
+        bcrypt_rounds = int(os.getenv("BCRYPT_ROUNDS", MIN_BCRYPT_ROUNDS))
+        if bcrypt_rounds < MIN_BCRYPT_ROUNDS:
+            raise ConfigError(f"BCRYPT_ROUNDS must be >= {MIN_BCRYPT_ROUNDS}")
+
+        return cls(
+            database_url=database_url,
+            jwt_secret=jwt_secret,
+            encryption_key=encryption_key,
+            jwt_ttl_minutes=int(os.getenv("JWT_ACCESS_TTL_MINUTES", 60)),
+            bcrypt_rounds=bcrypt_rounds,
+            cookie_secure=os.getenv("COOKIE_SECURE", "true").lower() != "false",
+        )

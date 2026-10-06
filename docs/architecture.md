@@ -157,7 +157,10 @@ All mutating routes: CSRF + JWT. Prefix `/`.
 | GET | `/register` | anon | view |
 | POST | `/api/auth/register` | anon | `RegisterUserCommand` |
 | POST | `/api/auth/login` | anon | `LoginCommand` |
-| POST | `/api/auth/logout` | any | expire cookies |
+| POST | `/api/auth/logout` | any | expire cookies, rotate CSRF token |
+| GET | `/api/auth/csrf` | anon | returns the double-submit CSRF token (also set as `kb_csrf` cookie on any response) |
+| GET | `/api/auth/me` | any authenticated | current `user_id` and `roles` from the JWT |
+| GET | `/me` | any authenticated | account page (view) |
 | GET | `/dashboard` | ADMIN | `GetAdminDashboardQuery` |
 | GET | `/me/requests` | REQUESTER | `GetMyRequestsQuery` |
 | GET | `/requests` | scoped | `SearchHelpRequestsQuery` |

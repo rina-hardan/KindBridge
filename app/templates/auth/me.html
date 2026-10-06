@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}My account · KindBridge{% endblock %}
+{% block nav %}
+<button id="logout" class="btn btn-outline-secondary btn-sm">Log out</button>
+{% endblock %}
+{% block content %}
+<div class="card border-0 shadow-sm">
+  <div class="card-body p-4">
+    <h1 class="h4 mb-3">You are logged in</h1>
+    <p class="mb-2">Your roles:</p>
+    <ul class="list-inline mb-0">
+      {% for role in identity.roles %}
+      <li class="list-inline-item"><span class="badge text-bg-light border">{{ role }}</span></li>
+      {% endfor %}
+    </ul>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  document.getElementById("logout").addEventListener("click", async () => {
+    await KB.post("/api/auth/logout", {});
+    window.location.href = "/login";
+  });
+</script>
+{% endblock %}

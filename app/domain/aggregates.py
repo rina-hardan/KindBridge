@@ -1,9 +1,11 @@
 """Aggregate roots. Each stream has one aggregate id; version is the concurrency token."""
 
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 from typing import Any, ClassVar
 from uuid import UUID, uuid4
 
+from app.domain import events as ev
 from app.domain.events import DomainEvent
 
 AGGREGATE_TYPES = ("User", "HelpRequest", "VolunteerProfile", "ExemptionLink")
@@ -108,3 +110,64 @@ class VolunteerProfile(AggregateRoot):
 
 class ExemptionLink(AggregateRoot):
     aggregate_type = "ExemptionLink"
+
+
+class UserAggregate:
+    """Decides which events a user registration or login produces."""
+
+    @staticmethod
+    def register(
+        user_id: UUID,
+        email: str,
+        full_name: str,
+        phone_encrypted: str,
+        password_hash: str,
+        volunteer_profile: dict[str, Any] | None,
+        now: datetime,
+    ) -> list[DomainEvent]:
+        payloads: list[tuple[str, dict[str, Any]]] = [
+            (ev.USER_REGISTERED, {"email": email, "full_name": full_name, "phone_encrypted": phone_encrypted}),
+            (ev.CREDENTIAL_SET, {"password_hash": password_hash}),
+        ]
+        if volunteer_profile is not None:
+            payloads.append((ev.VOLUNTEER_PROFILE_ENABLED, volunteer_profile))
+        return UserAggregate._number(user_id, payloads, start_version=1, now=now)
+
+    @staticmethod
+    def bootstrap_admin(
+        user_id: UUID,
+        email: str,
+        full_name: str,
+        phone_encrypted: str,
+        password_hash: str,
+        now: datetime,
+    ) -> list[DomainEvent]:
+        payloads = [
+            (ev.USER_REGISTERED, {"email": email, "full_name": full_name, "phone_encrypted": phone_encrypted}),
+            (ev.CREDENTIAL_SET, {"password_hash": password_hash}),
+            (ev.ADMIN_BOOTSTRAPPED, {}),
+        ]
+        return UserAggregate._number(user_id, payloads, start_version=1, now=now)
+
+    @staticmethod
+    def logged_in(user_id: UUID, current_version: int, now: datetime) -> DomainEvent:
+        return UserAggregate._number(user_id, [(ev.USER_LOGGED_IN, {})], current_version + 1, now)[0]
+
+    @staticmethod
+    def _number(
+        user_id: UUID,
+        payloads: list[tuple[str, dict[str, Any]]],
+        start_version: int,
+        now: datetime,
+    ) -> list[DomainEvent]:
+        return [
+            DomainEvent(
+                aggregate_id=user_id,
+                aggregate_type=ev.USER_AGGREGATE,
+                event_type=event_type,
+                payload=payload,
+                version=start_version + offset,
+                created_at=now,
+            )
+            for offset, (event_type, payload) in enumerate(payloads)
+        ]

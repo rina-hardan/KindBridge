@@ -18,6 +18,7 @@ from app.repositories.event_store import (
     SqlEventStore,
     is_aggregate_version_conflict,
 )
+from tests.conftest import csrf_post
 
 
 def _registered(user_id: UUID | None = None, email: str = "ada@kindbridge.org") -> User:
@@ -286,9 +287,7 @@ def test_round_trip_row_preserves_event_fields():
     assert restored.created_at == created_at
 
 
-def test_http_conflict_and_auth_errors():
-    app = create_app({"TESTING": True, "JWT_SECRET": "test-secret", "SECRET_KEY": "test-secret"})
-
+def test_http_conflict_and_auth_errors(app):
     @app.post("/_conflict")
     def _conflict():
         raise ConcurrencyConflict("expected version 1 but found 2")
@@ -302,8 +301,9 @@ def test_http_conflict_and_auth_errors():
         raise Forbidden("volunteer cannot approve")
 
     client = app.test_client()
+    client.get("/api/auth/csrf")
 
-    conflict = client.post("/_conflict")
+    conflict = csrf_post(client, "/_conflict")
     assert conflict.status_code == 409
     assert conflict.get_json()["error"] == "conflict"
 
@@ -315,18 +315,19 @@ def test_http_conflict_and_auth_errors():
     assert forbidden.status_code == 403
     assert forbidden.get_json()["error"] == "forbidden"
 
-    assert "command_bus" in app.extensions
-    assert isinstance(app.extensions["event_store"], InMemoryEventStore)
+    services = app.extensions["kindbridge"]
+    assert isinstance(services.bus, CommandBus)
+    assert services.bus.event_store is services.event_store
+    assert isinstance(services.event_store, SqlEventStore)
 
 
-def test_production_factory_requires_database_and_jwt_secret():
+def test_production_factory_requires_database_and_jwt_secret(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "")
+    monkeypatch.setenv("JWT_SECRET", "x" * 40)
     with pytest.raises(RuntimeError, match="DATABASE_URL"):
-        create_app({"TESTING": False, "DATABASE_URL": "", "JWT_SECRET": "secret"})
+        create_app()
+
+    monkeypatch.setenv("DATABASE_URL", "Driver={ODBC Driver 18 for SQL Server}")
+    monkeypatch.setenv("JWT_SECRET", "")
     with pytest.raises(RuntimeError, match="JWT_SECRET"):
-        create_app(
-            {
-                "TESTING": False,
-                "DATABASE_URL": "Driver={ODBC Driver 18 for SQL Server}",
-                "JWT_SECRET": "",
-            }
-        )
+        create_app()

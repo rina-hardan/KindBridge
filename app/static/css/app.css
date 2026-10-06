@@ -1,0 +1,25 @@
+:root {
+  --kb-accent: #0f6e6e;
+  --kb-accent-hover: #0b5656;
+}
+
+.kb-brand {
+  color: var(--kb-accent);
+}
+
+.btn-kb {
+  background-color: var(--kb-accent);
+  border-color: var(--kb-accent);
+  color: #fff;
+}
+
+.btn-kb:hover,
+.btn-kb:focus-visible {
+  background-color: var(--kb-accent-hover);
+  border-color: var(--kb-accent-hover);
+  color: #fff;
+}
+
+.btn-kb:disabled {
+  opacity: 0.65;
+}

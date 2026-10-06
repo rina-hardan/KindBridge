@@ -3,69 +3,17 @@
 import threading
 from collections.abc import Callable, Sequence
 from typing import Any, Protocol
-from urllib.parse import quote_plus
 from uuid import UUID
 
-from sqlalchemy import create_engine, text
-from sqlalchemy.engine import Engine
+from sqlalchemy import Connection, Engine, func, insert, select
 from sqlalchemy.exc import IntegrityError
 
 from app.domain.errors import ConcurrencyConflict
-from app.domain.events import DomainEvent
+from app.domain.events import DomainEvent, payload_to_json
+from app.repositories.db import make_engine
+from app.repositories.tables import event_store
 
 Projector = Callable[[Sequence[DomainEvent], Any], None]
-
-_SELECT_VERSION = text(
-    """
-    SELECT ISNULL(MAX(version), 0)
-    FROM dbo.event_store WITH (UPDLOCK, HOLDLOCK)
-    WHERE aggregate_id = :aggregate_id
-    """
-)
-
-_INSERT_EVENT = text(
-    """
-    INSERT INTO dbo.event_store (
-        event_id,
-        aggregate_id,
-        aggregate_type,
-        event_type,
-        payload_json,
-        version,
-        correlation_id,
-        causation_id,
-        created_at
-    ) VALUES (
-        :event_id,
-        :aggregate_id,
-        :aggregate_type,
-        :event_type,
-        :payload_json,
-        :version,
-        :correlation_id,
-        :causation_id,
-        :created_at
-    )
-    """
-)
-
-_SELECT_STREAM = text(
-    """
-    SELECT
-        event_id,
-        aggregate_id,
-        aggregate_type,
-        event_type,
-        payload_json,
-        version,
-        correlation_id,
-        causation_id,
-        created_at
-    FROM dbo.event_store
-    WHERE aggregate_id = :aggregate_id
-    ORDER BY version ASC
-    """
-)
 
 
 class EventStore(Protocol):
@@ -88,11 +36,18 @@ class EventStore(Protocol):
         """
 
 
-def sqlalchemy_url_for(database_url: str) -> str:
-    """Accept a SQLAlchemy URL or a raw ODBC connection string."""
-    if "://" in database_url:
-        return database_url
-    return "mssql+pyodbc:///?odbc_connect=" + quote_plus(database_url)
+class TransactionalEventStore(EventStore, Protocol):
+    """An event store that can join a transaction the caller already opened."""
+
+    def append_in(
+        self,
+        conn: Connection,
+        aggregate_id: UUID,
+        expected_version: int,
+        events: Sequence[DomainEvent],
+    ) -> None: ...
+
+    def current_version(self, conn: Connection, aggregate_id: UUID) -> int: ...
 
 
 def validate_append(
@@ -112,11 +67,13 @@ def validate_append(
 
 
 def is_aggregate_version_conflict(exc: BaseException) -> bool:
-    """True when SQL Server rejected the insert on ``(aggregate_id, version)``."""
+    """True when the database rejected the insert on ``(aggregate_id, version)``."""
     message = str(getattr(exc, "orig", exc))
     if "UQ_event_store_aggregate_version" in message:
         return True
     lowered = message.lower()
+    if "unique constraint failed" in lowered and "event_store.version" in lowered:
+        return True
     return ("2627" in message or "2601" in message) and "version" in lowered
 
 
@@ -156,10 +113,24 @@ class InMemoryEventStore:
             self._streams[aggregate_id] = [*current, *pending]
 
 
-class SqlEventStore:
-    """Append-only store on ``dbo.event_store`` (see ``db/schema.sql``)."""
+def _insert_row(event: DomainEvent) -> dict[str, Any]:
+    return {
+        "event_id": event.event_id,
+        "aggregate_id": event.aggregate_id,
+        "aggregate_type": event.aggregate_type,
+        "event_type": event.event_type,
+        "payload_json": payload_to_json(event.payload),
+        "version": event.version,
+        "correlation_id": event.correlation_id,
+        "causation_id": event.causation_id,
+        "created_at": event.to_row()["created_at"],
+    }
 
-    def __init__(self, database_url: str, engine: Engine | None = None) -> None:
+
+class SqlEventStore:
+    """Append-only store on ``dbo.event_store`` (see ``db/schema.sql``). No update or delete method."""
+
+    def __init__(self, database_url: str = "", engine: Engine | None = None) -> None:
         if engine is None and not database_url:
             raise ValueError("DATABASE_URL is required")
         self._database_url = database_url
@@ -168,18 +139,17 @@ class SqlEventStore:
     @property
     def engine(self) -> Engine:
         if self._engine is None:
-            self._engine = create_engine(
-                sqlalchemy_url_for(self._database_url),
-                pool_pre_ping=True,
-            )
+            self._engine = make_engine(self._database_url)
         return self._engine
 
     def load_stream(self, aggregate_id: UUID) -> list[DomainEvent]:
+        stmt = (
+            select(event_store)
+            .where(event_store.c.aggregate_id == aggregate_id)
+            .order_by(event_store.c.version)
+        )
         with self.engine.connect() as connection:
-            rows = connection.execute(
-                _SELECT_STREAM,
-                {"aggregate_id": str(aggregate_id)},
-            ).mappings()
+            rows = connection.execute(stmt).mappings()
             return [DomainEvent.from_row(row) for row in rows]
 
     def append(
@@ -192,29 +162,42 @@ class SqlEventStore:
     ) -> None:
         if not events:
             return
-        validate_append(aggregate_id, expected_version, events)
         pending = list(events)
+        with self.engine.begin() as connection:
+            self.append_in(connection, aggregate_id, expected_version, pending)
+            if projector is not None:
+                projector(pending, connection)
+
+    def append_in(
+        self,
+        conn: Connection,
+        aggregate_id: UUID,
+        expected_version: int,
+        events: Sequence[DomainEvent],
+    ) -> None:
+        """Append inside the caller's transaction, so projections can commit atomically with it."""
+        if not events:
+            return
+        validate_append(aggregate_id, expected_version, events)
+        current_version = self.current_version(conn, aggregate_id)
+        if current_version != expected_version:
+            raise ConcurrencyConflict(
+                f"aggregate {aggregate_id} expected version {expected_version} "
+                f"but found {current_version}"
+            )
         try:
-            with self.engine.begin() as connection:
-                current_version = int(
-                    connection.execute(
-                        _SELECT_VERSION,
-                        {"aggregate_id": str(aggregate_id)},
-                    ).scalar()
-                    or 0
-                )
-                if current_version != expected_version:
-                    raise ConcurrencyConflict(
-                        f"aggregate {aggregate_id} expected version {expected_version} "
-                        f"but found {current_version}"
-                    )
-                for event in pending:
-                    connection.execute(_INSERT_EVENT, event.to_row())
-                if projector is not None:
-                    projector(pending, connection)
+            conn.execute(insert(event_store), [_insert_row(event) for event in events])
         except IntegrityError as exc:
             if is_aggregate_version_conflict(exc):
                 raise ConcurrencyConflict(
                     f"aggregate {aggregate_id} version conflict at expected version {expected_version}"
                 ) from exc
             raise
+
+    def current_version(self, conn: Connection, aggregate_id: UUID) -> int:
+        stmt = (
+            select(func.coalesce(func.max(event_store.c.version), 0))
+            .where(event_store.c.aggregate_id == aggregate_id)
+            .with_hint(event_store, "WITH (UPDLOCK, HOLDLOCK)", "mssql")
+        )
+        return int(conn.execute(stmt).scalar() or 0)
