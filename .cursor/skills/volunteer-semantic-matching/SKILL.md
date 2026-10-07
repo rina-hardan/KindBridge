@@ -24,7 +24,7 @@ Order is fixed. Do not filter the whole catalogue and then cut to 3.
 
 1. **Load** the request projection and its required skills. When `concurrency_type` is `UNKNOWN`, classify it first (`FLEXIBLE_REMOTE` → `PARALLEL_OK`, otherwise `EXCLUSIVE`, which is also how an unclassified `UNKNOWN` is treated) and store `ConcurrencyClassified`.
 2. **Retrieve (RAG):** embed `description + category + required_skills` (plus requester accessibility notes when present), query `volunteer_resumes` with `top_n = 15`.
-3. **Hard filter** only those 15 (drop, do not score). Checks from system-spec 4.2: inactive, self-assignment, exemption, declined on this request, unavailability period, geography, vehicle, capacity, schedule overlap. Similarity is not a check. There is no `SEMANTIC_FILTER_NO_OVERLAP`.
+3. **Hard filter** only those 15 (drop, do not score). Checks from system-spec 4.2: inactive, self-assignment, exemption, declined on this request, unavailability period, geography (Hebrew and English names of a known city match), vehicle, capacity, schedule overlap. Similarity is not a check. There is no `SEMANTIC_FILTER_NO_OVERLAP`.
 4. **Capacity tool:** call `CheckVolunteerCapacityTool` for each remaining candidate; drop if `eligible = false`. `UNKNOWN` uses the `EXCLUSIVE` cap.
 5. **Travel tool:** call `CalculateTravelContextTool`; use its `feasibility`.
 6. **Web context (Tavily MCP):** city-level disruption query, timeout 8 s. On failure skip and set `web_lookup=skipped`. If the model flags `unsafe_travel`, multiply feasibility by 0.5.
@@ -39,7 +39,7 @@ Ids: `exemption_links.volunteer_id` is `users.id`. Assignments and unavailabilit
 ```
 score = 100 * (
   0.45 * cosine_similarity_clipped   # 0..1 from Chroma
-  + 0.20 * skill_overlap             # |intersection| / |required| (1 if required empty)
+  + 0.20 * skill_overlap             # |intersection| / |required| after Hebrew/English aliases (1 if required empty)
   + 0.15 * travel_feasibility        # 1 same city; 0.6 if < 40 km; else 0.2
   + 0.10 * urgency_fit               # EMERGENCY 1.0, HIGH 0.85, NORMAL 0.7, LOW 0.55
   + 0.05 * vehicle_fit               # 1 if not required or has_vehicle

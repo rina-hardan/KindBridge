@@ -1,6 +1,6 @@
 import bcrypt
 
-MIN_PASSWORD_LENGTH = 10
+MIN_PASSWORD_LENGTH = 6
 MAX_PASSWORD_BYTES = 72  # bcrypt rejects longer inputs
 
 

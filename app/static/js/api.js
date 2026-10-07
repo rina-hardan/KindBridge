@@ -32,7 +32,7 @@ window.KB = (() => {
       }
     });
     if (!shownInline) {
-      banner.textContent = result.data.message || "Something went wrong. Please try again.";
+      banner.textContent = result.data.message || window.KB_TEXT.genericError;
       banner.classList.remove("d-none");
     }
   }
@@ -45,6 +45,7 @@ window.KB = (() => {
       event.preventDefault();
       clearErrors(form);
       banner.classList.add("d-none");
+      document.getElementById("form-success")?.classList.add("d-none");
       button.disabled = true;
       try {
         const result = await post(url, buildBody(form));
@@ -54,7 +55,7 @@ window.KB = (() => {
           showErrors(form, banner, result);
         }
       } catch {
-        banner.textContent = "Network error. Check your connection and try again.";
+        banner.textContent = window.KB_TEXT.networkError;
         banner.classList.remove("d-none");
       } finally {
         button.disabled = false;

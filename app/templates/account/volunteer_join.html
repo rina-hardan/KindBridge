@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}{{ t("volunteer.title") }} · KindBridge{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-12 col-lg-7">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body p-4">
+        <h1 class="h4 mb-1">{{ t("volunteer.title") }}</h1>
+        <p class="text-body-secondary small mb-4">{{ t("volunteer.lead") }}</p>
+        <div id="form-error" class="alert alert-danger d-none" role="alert"></div>
+        <form id="volunteer-form" novalidate>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label for="primary_city" class="form-label">{{ t("volunteer.city") }}</label>
+              <input id="primary_city" name="primary_city" class="form-control" value="{{ account.city or '' }}" dir="auto" required aria-describedby="city-help">
+              <div id="city-help" class="form-text">{{ t("field.city_help") }}</div>
+              <div class="invalid-feedback" data-field="primary_city"></div>
+            </div>
+            <div class="col-md-6">
+              <label for="base_frequency" class="form-label">{{ t("volunteer.frequency") }}</label>
+              <select id="base_frequency" name="base_frequency" class="form-select" required>
+                <option value="ON_DEMAND">{{ t("volunteer.on_demand") }}</option>
+                <option value="WEEKLY">{{ t("volunteer.weekly") }}</option>
+                <option value="BIWEEKLY">{{ t("volunteer.biweekly") }}</option>
+                <option value="MONTHLY">{{ t("volunteer.monthly") }}</option>
+              </select>
+              <div class="invalid-feedback" data-field="base_frequency"></div>
+            </div>
+            <div class="col-12">
+              <label for="skills" class="form-label">{{ t("volunteer.skills") }}</label>
+              <input id="skills" name="skills" class="form-control" dir="auto" required aria-describedby="skills-help">
+              <div id="skills-help" class="form-text">{{ t("volunteer.skills_help") }}</div>
+              <div class="invalid-feedback" data-field="skills"></div>
+            </div>
+            <div class="col-12">
+              <label for="experience" class="form-label">{{ t("volunteer.experience") }}</label>
+              <textarea id="experience" name="experience" class="form-control" rows="4" dir="auto" required></textarea>
+              <div class="invalid-feedback" data-field="experience"></div>
+            </div>
+            <div class="col-12">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="has_vehicle" name="has_vehicle">
+                <label class="form-check-label" for="has_vehicle">{{ t("volunteer.vehicle") }}</label>
+              </div>
+              <div class="invalid-feedback" data-field="has_vehicle"></div>
+            </div>
+          </div>
+          <div class="d-flex gap-2 mt-4">
+            <button type="submit" class="btn btn-kb">{{ t("requester.save") }}</button>
+            <a class="btn btn-outline-secondary" href="{{ url_for('account.profile_page') }}">{{ t("requester.back") }}</a>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  KB.bindForm("volunteer-form", "/api/me/volunteer", (form) => ({
+    primary_city: form.primary_city.value,
+    base_frequency: form.base_frequency.value,
+    skills: form.skills.value.split(/[,،、]/).map((s) => s.trim()).filter(Boolean),
+    experience: form.experience.value,
+    has_vehicle: form.has_vehicle.checked,
+  }), () => { window.location.href = "/me/tasks"; });
+</script>
+{% endblock %}

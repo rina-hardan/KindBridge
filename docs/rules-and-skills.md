@@ -35,7 +35,7 @@ Always-on for this repo (`alwaysApply: true`): CQRS separation, append-only even
 
 ### Privacy
 
-`users.phone` and `requester_profiles.emergency_contact_phone` are encrypted at rest with Fernet. The ciphertext is what is stored and what enters the event payload (`phone_encrypted`, `emergency_contact_phone_encrypted`). `full_name` is stored in plaintext.
+`users.phone` and `requester_profiles.emergency_contact_phone` are encrypted at rest with Fernet. The ciphertext is what is stored and what enters the event payload (`phone_encrypted`, `emergency_contact_phone_encrypted`). `full_name`, `users.city`, and `users.home_address` are stored in plaintext. `home_address` is the residence of a requester or volunteer. An admin row keeps both NULL. Register and login responses do not return them. Help-request address visibility is unchanged.
 
 `help_requests.address` and `requester_profiles.default_address` are stored in plaintext in the table and in the event payload. Queries hide a request address from a volunteer until that volunteer is `ASSIGNED` (`AssignmentApproved` or `AssignmentOverridden`). Admins can see address and phone. A requester does not see another requester's address or phone, and sees the assigned volunteer's phone only after `ASSIGNED`.
 

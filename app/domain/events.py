@@ -12,6 +12,7 @@ USER_AGGREGATE = "User"
 HELP_REQUEST_AGGREGATE = "HelpRequest"
 
 USER_REGISTERED = "UserRegistered"
+USER_DETAILS_UPDATED = "UserDetailsUpdated"
 HELP_REQUEST_CREATED = "HelpRequestCreated"
 CONCURRENCY_CLASSIFIED = "ConcurrencyClassified"
 MATCHES_PROPOSED = "MatchesProposed"
@@ -19,11 +20,14 @@ NO_MATCH_FOUND = "NoMatchFound"
 CREDENTIAL_SET = "CredentialSet"
 ADMIN_BOOTSTRAPPED = "AdminBootstrapped"
 VOLUNTEER_PROFILE_ENABLED = "VolunteerProfileEnabled"
+REQUESTER_PROFILE_UPDATED = "RequesterProfileUpdated"
 USER_LOGGED_IN = "UserLoggedIn"
 
 _PLAINTEXT_PASSWORD_KEYS = frozenset({"password", "plain_password", "plaintext_password"})
 # Payload keys that must never be written to logs or debug output.
-SENSITIVE_PAYLOAD_KEYS = _PLAINTEXT_PASSWORD_KEYS | frozenset({"password_hash", "phone_encrypted"})
+SENSITIVE_PAYLOAD_KEYS = _PLAINTEXT_PASSWORD_KEYS | frozenset(
+    {"password_hash", "phone_encrypted", "emergency_contact_phone_encrypted"}
+)
 
 
 def _as_utc(value: datetime) -> datetime:

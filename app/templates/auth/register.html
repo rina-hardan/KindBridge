@@ -1,83 +1,52 @@
 {% extends "base.html" %}
-{% block title %}Create account · KindBridge{% endblock %}
+{% block title %}{{ t("register.title") }} · KindBridge{% endblock %}
 {% block content %}
 <div class="row justify-content-center">
   <div class="col-12 col-md-9 col-lg-6">
     <div class="card border-0 shadow-sm">
       <div class="card-body p-4">
-        <h1 class="h4 mb-1">Create an account</h1>
-        <p class="text-body-secondary small mb-4">Every account can ask for help. Turn on volunteering to also offer help.</p>
+        <h1 class="h4 mb-1">{{ t("register.title") }}</h1>
+        <p class="text-body-secondary small mb-4">{{ t("register.lead") }}</p>
         <div id="form-error" class="alert alert-danger d-none" role="alert"></div>
         <form id="register-form" novalidate>
           <div class="row g-3">
             <div class="col-12">
-              <label for="full_name" class="form-label">Full name</label>
-              <input id="full_name" name="full_name" class="form-control" autocomplete="name" required>
+              <label for="full_name" class="form-label">{{ t("field.full_name") }}</label>
+              <input id="full_name" name="full_name" class="form-control" autocomplete="name" dir="auto" required>
               <div class="invalid-feedback" data-field="full_name"></div>
             </div>
             <div class="col-md-6">
-              <label for="email" class="form-label">Email</label>
+              <label for="email" class="form-label">{{ t("field.email") }}</label>
               <input id="email" name="email" type="email" class="form-control" autocomplete="email" required>
               <div class="invalid-feedback" data-field="email"></div>
             </div>
             <div class="col-md-6">
-              <label for="phone" class="form-label">Phone</label>
+              <label for="phone" class="form-label">{{ t("field.phone") }}</label>
               <input id="phone" name="phone" type="tel" class="form-control" autocomplete="tel" required>
               <div class="invalid-feedback" data-field="phone"></div>
             </div>
+            <div class="col-md-6">
+              <label for="city" class="form-label">{{ t("field.city") }}</label>
+              <input id="city" name="city" class="form-control" autocomplete="address-level2" dir="auto" required aria-describedby="city-help">
+              <div id="city-help" class="form-text">{{ t("field.city_help") }}</div>
+              <div class="invalid-feedback" data-field="city"></div>
+            </div>
+            <div class="col-md-6">
+              <label for="home_address" class="form-label">{{ t("field.home_address") }}</label>
+              <input id="home_address" name="home_address" class="form-control" autocomplete="street-address" dir="auto" required>
+              <div class="invalid-feedback" data-field="home_address"></div>
+            </div>
             <div class="col-12">
-              <label for="password" class="form-label">Password</label>
-              <input id="password" name="password" type="password" class="form-control" autocomplete="new-password" minlength="10" required aria-describedby="password-help">
-              <div id="password-help" class="form-text">At least 10 characters.</div>
+              <label for="password" class="form-label">{{ t("field.password") }}</label>
+              <input id="password" name="password" type="password" class="form-control" autocomplete="new-password" minlength="6" required aria-describedby="password-help">
+              <div id="password-help" class="form-text">{{ t("register.password_help") }}</div>
               <div class="invalid-feedback" data-field="password"></div>
             </div>
           </div>
-
-          <div class="form-check form-switch my-4">
-            <input class="form-check-input" type="checkbox" role="switch" id="is_volunteer">
-            <label class="form-check-label" for="is_volunteer">I also want to volunteer</label>
-          </div>
-
-          <fieldset id="volunteer-fields" class="row g-3 d-none" disabled>
-            <legend class="h6">Volunteer profile</legend>
-            <div class="col-md-6">
-              <label for="primary_city" class="form-label">City</label>
-              <input id="primary_city" name="primary_city" class="form-control">
-              <div class="invalid-feedback" data-field="volunteer_profile.primary_city"></div>
-            </div>
-            <div class="col-md-6">
-              <label for="base_frequency" class="form-label">How often can you help?</label>
-              <select id="base_frequency" name="base_frequency" class="form-select">
-                <option value="ON_DEMAND">As needed</option>
-                <option value="WEEKLY">Weekly</option>
-                <option value="BIWEEKLY">Every two weeks</option>
-                <option value="MONTHLY">Monthly</option>
-              </select>
-              <div class="invalid-feedback" data-field="volunteer_profile.base_frequency"></div>
-            </div>
-            <div class="col-12">
-              <label for="skills" class="form-label">Skills</label>
-              <input id="skills" name="skills" class="form-control" aria-describedby="skills-help">
-              <div id="skills-help" class="form-text">Separate with commas, e.g. first aid, driving, cooking.</div>
-              <div class="invalid-feedback" data-field="volunteer_profile.skills"></div>
-            </div>
-            <div class="col-12">
-              <label for="experience" class="form-label">Experience</label>
-              <textarea id="experience" name="experience" class="form-control" rows="4"></textarea>
-              <div class="invalid-feedback" data-field="volunteer_profile.experience"></div>
-            </div>
-            <div class="col-12">
-              <div class="form-check">
-                <input class="form-check-input" type="checkbox" id="has_vehicle" name="has_vehicle">
-                <label class="form-check-label" for="has_vehicle">I have a vehicle</label>
-              </div>
-            </div>
-          </fieldset>
-
-          <button type="submit" class="btn btn-kb w-100 mt-4">Create account</button>
+          <button type="submit" class="btn btn-kb w-100 mt-4">{{ t("register.submit") }}</button>
         </form>
         <p class="mt-4 mb-0 text-center small">
-          Already registered? <a href="{{ url_for('auth.login_page') }}">Log in</a>
+          {{ t("register.already") }} <a href="{{ url_for('auth.login_page') }}">{{ t("login.title") }}</a>
         </p>
       </div>
     </div>
@@ -86,30 +55,13 @@
 {% endblock %}
 {% block scripts %}
 <script>
-  const toggle = document.getElementById("is_volunteer");
-  const volunteerFields = document.getElementById("volunteer-fields");
-  toggle.addEventListener("change", () => {
-    volunteerFields.disabled = !toggle.checked;
-    volunteerFields.classList.toggle("d-none", !toggle.checked);
-  });
-
-  KB.bindForm("register-form", "/api/auth/register", (form) => {
-    const body = {
-      full_name: form.full_name.value,
-      email: form.email.value,
-      phone: form.phone.value,
-      password: form.password.value,
-    };
-    if (toggle.checked) {
-      body.volunteer_profile = {
-        primary_city: form.primary_city.value,
-        base_frequency: form.base_frequency.value,
-        skills: form.skills.value.split(",").map((s) => s.trim()).filter(Boolean),
-        experience: form.experience.value,
-        has_vehicle: form.has_vehicle.checked,
-      };
-    }
-    return body;
-  }, () => { window.location.href = "/login"; });
+  KB.bindForm("register-form", "/api/auth/register", (form) => ({
+    full_name: form.full_name.value,
+    email: form.email.value,
+    phone: form.phone.value,
+    city: form.city.value,
+    home_address: form.home_address.value,
+    password: form.password.value,
+  }), () => { window.location.href = "/me"; });
 </script>
 {% endblock %}

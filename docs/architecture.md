@@ -161,9 +161,15 @@ All mutating routes: CSRF + JWT. Prefix `/`.
 | POST | `/api/auth/logout` | any | expire cookies, rotate CSRF token |
 | GET | `/api/auth/csrf` | anon | returns the double-submit CSRF token (also set as `kb_csrf` cookie on any response) |
 | GET | `/api/auth/me` | any authenticated | current `user_id` and `roles` from the JWT |
-| GET | `/me` | any authenticated | account page (view) |
+| GET | `/me` | any authenticated | account page; `GetMyAccountQuery` |
+| GET | `/api/me/account` | any authenticated | `GetMyAccountQuery` |
+| POST | `/api/me/account` | any authenticated | `UpdateAccountDetailsCommand` (email cannot change) |
+| GET | `/me/requester` | non-admin | requester enrollment view; redirects to `/me/requests` when a requester profile exists |
+| POST | `/api/me/requester` | non-admin | `UpdateRequesterProfileCommand` |
+| GET | `/me/volunteer` | non-admin | volunteer enrollment view; redirects to `/me/tasks` when a volunteer profile exists |
+| POST | `/api/me/volunteer` | non-admin | `EnableVolunteerProfileCommand` |
 | GET | `/dashboard` | ADMIN | `GetAdminDashboardQuery` |
-| GET | `/me/requests` | REQUESTER | `GetMyRequestsQuery` |
+| GET | `/me/requests` | non-admin with a requester profile | holding page until `GetMyRequestsQuery`; otherwise redirect to `/me/requester` |
 | GET | `/requests` | scoped | `SearchHelpRequestsQuery` |
 | GET | `/requests/<id>` | scoped | `GetHelpRequestDetailsQuery` |
 | POST | `/api/requests` | REQUESTER | `SubmitHelpRequestCommand` |
@@ -172,7 +178,7 @@ All mutating routes: CSRF + JWT. Prefix `/`.
 | POST | `/api/requests/<id>/reject` | ADMIN | `RejectAssignmentCommand` |
 | POST | `/api/requests/<id>/override` | ADMIN | `OverrideAssignmentCommand` |
 | POST | `/api/requests/<id>/retrigger` | ADMIN | `RetriggerMatchCommand` |
-| GET | `/me/tasks` | VOLUNTEER | `GetVolunteerTasksQuery` |
+| GET | `/me/tasks` | non-admin with a volunteer profile | holding page until `GetVolunteerTasksQuery`; otherwise redirect to `/me/volunteer` |
 | POST | `/api/assignments/<id>/complete` | assigned volunteer | `CompleteTaskCommand` |
 | POST | `/api/assignments/<id>/release` | assigned volunteer | `ReleaseTaskCommand` |
 | POST | `/api/profile` | VOLUNTEER | `UpdateVolunteerProfileCommand` (includes the `INACTIVE` toggle) |

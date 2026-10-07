@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}{{ t("tasks.title") }} · KindBridge{% endblock %}
+{% block content %}
+<div class="card border-0 shadow-sm">
+  <div class="card-body p-4">
+    <h1 class="h4 mb-2">{{ t("tasks.title") }}</h1>
+    <p class="mb-4">{{ t("tasks.body") }}</p>
+    <a class="btn btn-outline-secondary" href="{{ url_for('account.profile_page') }}">{{ t("requester.back") }}</a>
+  </div>
+</div>
+{% endblock %}

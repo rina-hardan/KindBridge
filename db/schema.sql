@@ -46,10 +46,28 @@ CREATE TABLE dbo.users (
     password_hash NVARCHAR(255) NOT NULL,
     full_name NVARCHAR(200) NOT NULL,
     phone NVARCHAR(400) NOT NULL, -- Fernet ciphertext
+    city NVARCHAR(100) NULL, -- residence municipality; NULL for admin
+    home_address NVARCHAR(255) NULL, -- residential street address, plaintext; NULL for admin
     is_admin BIT NOT NULL DEFAULT 0,
     is_active BIT NOT NULL DEFAULT 1,
     created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
 );
+
+-- Residence belongs to requesters and volunteers. Admins stay NULL.
+IF COL_LENGTH(N'dbo.users', N'city') IS NULL
+    ALTER TABLE dbo.users ADD city NVARCHAR(100) NULL;
+IF COL_LENGTH(N'dbo.users', N'home_address') IS NULL
+    ALTER TABLE dbo.users ADD home_address NVARCHAR(255) NULL;
+IF EXISTS (SELECT 1 FROM sys.default_constraints WHERE name = N'DF_users_city' AND parent_object_id = OBJECT_ID(N'dbo.users'))
+    ALTER TABLE dbo.users DROP CONSTRAINT DF_users_city;
+IF EXISTS (SELECT 1 FROM sys.default_constraints WHERE name = N'DF_users_home_address' AND parent_object_id = OBJECT_ID(N'dbo.users'))
+    ALTER TABLE dbo.users DROP CONSTRAINT DF_users_home_address;
+IF COL_LENGTH(N'dbo.users', N'city') IS NOT NULL
+    ALTER TABLE dbo.users ALTER COLUMN city NVARCHAR(100) NULL;
+IF COL_LENGTH(N'dbo.users', N'home_address') IS NOT NULL
+    ALTER TABLE dbo.users ALTER COLUMN home_address NVARCHAR(255) NULL;
+IF COL_LENGTH(N'dbo.users', N'city') IS NOT NULL AND COL_LENGTH(N'dbo.users', N'home_address') IS NOT NULL
+    UPDATE dbo.users SET city = NULL, home_address = NULL WHERE is_admin = 1;
 
 -- 3. Requester Profiles (1:1 Extension for Requesters)
 IF OBJECT_ID(N'dbo.requester_profiles', N'U') IS NULL

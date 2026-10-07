@@ -19,11 +19,13 @@ from app.domain.matching import (
     TimeSlot,
     UnavailabilityPeriod,
     VolunteerRecord,
+    cities_match,
     default_concurrency,
     is_self_assignment,
     rank_proposals,
     rejection_reason,
     score_candidate,
+    skill_overlap,
     tasks_overlap,
 )
 from app.infrastructure.vector_store import ResumeHit, VectorStoreUnavailable
@@ -96,6 +98,8 @@ def _user(conn, user_id, email):
             password_hash="hash",
             full_name="Test User",
             phone="cipher",
+            city="Haifa",
+            home_address="1 Harbor Rd",
             is_admin=False,
             is_active=True,
             created_at=datetime(2026, 10, 6, 12, 0, 0),
@@ -609,3 +613,14 @@ def test_hard_filter_rules_and_score_formula():
     assert calculate_travel_context("Haifa", "Haifa", "PHYSICAL_PRESENCE")["feasibility"] == 1
     assert calculate_travel_context("Haifa", "Akko", "PHYSICAL_PRESENCE", distance_km=30)["feasibility"] == 0.6
     assert calculate_travel_context("Haifa", "Eilat", "PHYSICAL_PRESENCE")["feasibility"] == 0.2
+
+    assert cities_match("חיפה", "Haifa")
+    assert cities_match("תל אביב", "Tel-Aviv")
+    assert cities_match("ת״א", "Tel Aviv-Yafo")
+    assert not cities_match("חיפה", "תל אביב")
+    assert not cities_match("חיפה", "עכו")
+    hebrew_city = _volunteer_record(primary_city="חיפה")
+    assert rejection_reason(hebrew_city, _facts(request)) is None
+    assert skill_overlap(("נהיגה", "עזרה ראשונה"), ("driving", "first aid")) == 1
+    assert skill_overlap(("בישול",), ("driving",)) == 0
+    assert calculate_travel_context("חיפה", "Haifa", "PHYSICAL_PRESENCE")["feasibility"] == 1

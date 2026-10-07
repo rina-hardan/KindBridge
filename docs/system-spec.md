@@ -20,6 +20,7 @@ KindBridge coordinates citizen assistance requests, volunteer capacity, and AI-a
   - `REQUESTER` for every non-admin user.
   - `VOLUNTEER` for a non-admin user with an enabled `volunteer_profiles` row.
   - A person may therefore hold `REQUESTER` and `VOLUNTEER` together.
+- **[CHANGED] Enrollment is not registration.** Public registration writes only the person (`users`). From the account page, "ask for help" saves a `requester_profiles` row and then opens the help-request area; "volunteer" saves a `volunteer_profiles` row and then opens the volunteer area. Until that row exists, the entry shows the enrollment form instead of the area. The `REQUESTER` role is still derived for every non-admin user.
 - **[NEW] Self-assignment is forbidden:** a volunteer can never be proposed, approved, or overridden onto a request they created (`volunteer_profiles.user_id = help_requests.requester_id`). Enforced by one shared function (`is_self_assignment`) called from the agent filter, `ApproveAssignmentCommand`, and `OverrideAssignmentCommand`.
 - Relational dialect: **Microsoft SQL Server** on Somee.com. Vector store is **ChromaDB**, not pgvector.
 - Application server: **Flask**, organized as CQRS/MVC (see [architecture.md](architecture.md)).
@@ -36,7 +37,7 @@ KindBridge coordinates citizen assistance requests, volunteer capacity, and AI-a
 ## 2. Authentication and identity
 
 - **Mechanism:** JWT in HttpOnly, Secure, SameSite=Lax cookies. Access token TTL 60 minutes; no refresh tokens in v1 (the user logs in again on expiry). CSRF: double-submit cookie on mutating POST/PUT/PATCH/DELETE.
-- **Password:** bcrypt (cost >= 12). Minimum 10 characters. No plaintext logs.
+- **Password:** bcrypt (cost >= 12). Minimum 6 characters. No plaintext logs.
 - **[CHANGED] RBAC:** the JWT carries `roles` as a **list** (e.g. `["REQUESTER","VOLUNTEER"]`), computed at login from `is_admin` and the volunteer profile. Every command and query checks that the list contains a role allowed for the action. Unauthorized -> 401; forbidden -> 403. If a person enables or disables the volunteer profile, the roles list refreshes on the next login (or on re-issue of the cookie after the command succeeds).
 - **Bootstrap:** the first admin is created by a one-time seed (`ADMIN_BOOTSTRAP_EMAIL` in environment), not via public registration. Admin status is never granted or removed through the app.
 - **Forgot-password:** out of scope for v1. Failed login lockout: 5 attempts / 15 minutes per email, tracked in the non-event-sourced `login_attempts` table.
@@ -46,7 +47,7 @@ KindBridge coordinates citizen assistance requests, volunteer capacity, and AI-a
 | Role | How obtained | Can do | Cannot do |
 | :--- | :--- | :--- | :--- |
 | Requester | Every public registration | Create/cancel/edit (before assignment) own requests; search/filter/detail **own** tickets; maintain own requester profile | See volunteer phone/address until `ASSIGNED`; see other requesters' tickets |
-| Volunteer | Enable volunteer profile (at registration or later) | Edit own profile; add/cancel unavailability periods; see **assigned** tasks; complete or release | See other volunteers; see full address until assigned; be assigned to own request |
+| Volunteer | Enable volunteer profile from the account page | Edit own profile; add/cancel unavailability periods; see **assigned** tasks; complete or release | See other volunteers; see full address until assigned; be assigned to own request |
 | Admin / dispatcher | Seed only; exclusive | Dashboard, search all, approve/reject/override, retrigger match, reclassify concurrency, manage exemptions | Impersonate login; submit requests; volunteer |
 
 ---
@@ -84,11 +85,15 @@ events (event store)  |  login_attempts (lockout)
 | `password_hash` | NVARCHAR(255) | NOT NULL | bcrypt hash; comes from the `CredentialSet` event |
 | `full_name` | NVARCHAR(200) | NOT NULL | Display name |
 | `phone` | NVARCHAR(400) | NOT NULL | Encrypted (app-level); ciphertext is longer than the plain number, hence 400 |
+| `city` | NVARCHAR(100) | NULL | **[CHANGED]** Residence municipality. Required for a requester or volunteer. NULL for an admin |
+| `home_address` | NVARCHAR(255) | NULL | **[CHANGED]** Residential street address. Plaintext. Required for a requester or volunteer. NULL for an admin |
 | `is_admin` | BIT | NOT NULL, default 0 | **Replaces `role`.** Exclusive admin flag |
 | `is_active` | BIT | NOT NULL, default 1 | Soft disable |
 | `created_at` | DATETIME2 | NOT NULL | UTC |
 
 There is no `role` column. See section 2 for how roles are derived.
+
+**[CHANGED] Residence.** A requester or a volunteer has a residence `city` and `home_address` on `users`. Public registration (`RegisterUserCommand`) requires both; a blank value is rejected. An admin is neither, so the admin seed leaves both NULL and does not collect them. These fields are the person's home, not the place a help request happens. `requester_profiles.default_city` and `default_address` stay optional pre-fills for the request form and may differ. Geography matching still uses `volunteer_profiles.primary_city`. Public registration does not collect a volunteer profile. When the person enables one from the account page, the volunteer city starts as the residence city and they may change it.
 
 ### 3.2 `requester_profiles` [NEW]
 
@@ -282,7 +287,7 @@ flowchart LR
 
 | Current | Command | Event | Next | Invariants |
 | :--- | :--- | :--- | :--- | :--- |
-| - | `RegisterUserCommand` | `UserRegistered` (+ `VolunteerProfileEnabled` if the form includes a volunteer profile) | (user exists) | No role in payload. `is_admin` is never set here |
+| - | `RegisterUserCommand` | `UserRegistered` (+ `VolunteerProfileEnabled` if the form includes a volunteer profile) | (user exists) | No role in payload. `is_admin` is never set here. `city` and `home_address` are required. The admin seed does not set them |
 | - | `LoginCommand` | `UserLoggedIn` | - | Audit only; no domain status |
 | - | `SubmitHelpRequestCommand` | `HelpRequestCreated` | `PENDING_REVIEW` | Non-admin only; enqueue agent |
 | `PENDING_REVIEW`, `NO_MATCH`, `MATCH_PROPOSED` | `UpdateHelpRequestCommand` | `HelpRequestUpdated` | `PENDING_REVIEW` | **[NEW]** Owner only. Not allowed once `ASSIGNED` (cancel and recreate). Open `PROPOSED` rows -> `SUPERSEDED`; concurrency type reclassified; agent re-queued |
@@ -312,7 +317,7 @@ Stage 1 of `ProposeMatchCommand`. It runs as plain code (a SQL query / MCP tool)
 | 3 | Exemption | An `exemption_links` row exists for the volunteer user and the requester |
 | 4 | Declined before | The volunteer has a `DECLINED` assignment on this request (reject or release) |
 | 5 | Unavailability | `preferred_date` (or today) falls inside a non-cancelled `volunteer_unavailability` period |
-| 6 | Geography | `resource_type` is `PHYSICAL_PRESENCE` or `EQUIPMENT_LOAN` and `volunteer.primary_city <> request.city`. `FLEXIBLE_REMOTE` ignores city. (v1 uses exact city match; a radius is deferred) |
+| 6 | Geography | `resource_type` is `PHYSICAL_PRESENCE` or `EQUIPMENT_LOAN` and the volunteer city is not the same municipality as the request city. Hebrew and English names of a known municipality match (`חיפה` and `Haifa`); hyphens and extra spaces are ignored. An unknown place matches only the same folded text. `FLEXIBLE_REMOTE` ignores city. A radius is deferred |
 | 7 | Vehicle | `requires_vehicle = 1` and `has_vehicle = 0` |
 | 8 | Capacity | Per the concurrency rules in 4.4 |
 | 9 | Schedule overlap | Per the concurrency rules in 4.4 |
@@ -352,14 +357,14 @@ Some tasks can run alongside others (a short phone check-in) and some cannot (ac
 
 ### 4.6 Scoring (stage 2, soft)
 
-Only volunteers who passed 4.2 are ranked. Inputs: semantic similarity between the request text (description + requester accessibility notes) and the volunteer resume (ChromaDB); required-skill coverage; `base_frequency` bonus; continuity bonus (series, deferred); urgency weight; overdue penalty. Top **3** become `PROPOSED` with `ai_score` and `ai_rationale`. Details in [agent-and-mcp.md](agent-and-mcp.md).
+Only volunteers who passed 4.2 are ranked. Inputs: semantic similarity between the request text (description + requester accessibility notes) and the volunteer resume (ChromaDB); required-skill coverage (a shared Hebrew/English vocabulary, otherwise the same folded text); `base_frequency` bonus; continuity bonus (series, deferred); urgency weight; overdue penalty. Top **3** become `PROPOSED` with `ai_score` and `ai_rationale`. Details in [agent-and-mcp.md](agent-and-mcp.md).
 
 ---
 
 ## 5. Commands and queries (complete list)
 
 **Commands:**
-`RegisterUserCommand`, `LoginCommand`,
+`RegisterUserCommand`, `LoginCommand`, `UpdateAccountDetailsCommand`,
 `EnableVolunteerProfileCommand` [NEW], `UpdateVolunteerProfileCommand`, `DisableVolunteerProfileCommand` [NEW],
 `AddVolunteerUnavailabilityCommand` [NEW], `CancelVolunteerUnavailabilityCommand` [NEW],
 `UpdateRequesterProfileCommand` [NEW],
@@ -374,13 +379,13 @@ Only volunteers who passed 4.2 are ranked. Inputs: semantic similarity between t
 **Queries:**
 `GetAdminDashboardQuery`, `SearchHelpRequestsQuery` (role-scoped filters: category, city, urgency, status), `GetHelpRequestDetailsQuery`, `GetVolunteerTasksQuery`, `GetMyRequestsQuery`, `GetMyProfilesQuery` [NEW] (requester + volunteer profiles and unavailability), `GetVolunteerDirectoryQuery` (admin), `GetAssignmentCandidatesQuery`.
 
-**Events (new or changed in v1.1):** `UserRegistered` (no role), `VolunteerProfileEnabled`, `VolunteerProfileUpdated`, `VolunteerProfileDisabled`, `VolunteerUnavailabilityAdded`, `VolunteerUnavailabilityCancelled`, `RequesterProfileUpdated`, `HelpRequestUpdated`, `ConcurrencyClassified`. Payload definitions go in [event-sourcing.md](event-sourcing.md).
+**Events (new or changed in v1.1):** `UserRegistered` (no role), `UserDetailsUpdated`, `VolunteerProfileEnabled`, `VolunteerProfileUpdated`, `VolunteerProfileDisabled`, `VolunteerUnavailabilityAdded`, `VolunteerUnavailabilityCancelled`, `RequesterProfileUpdated`, `HelpRequestUpdated`, `ConcurrencyClassified`. Payload definitions go in [event-sourcing.md](event-sourcing.md).
 
 ---
 
 ## 6. User workflows (course 4.1-4.5)
 
-1. **Data entry:** register (optionally with a volunteer profile); a requester creates a ticket; a volunteer submits profile/resume fields and unavailability periods.
+1. **Data entry:** register with name, email, phone, password, residence city, and home address only. From the account page the person saves a requester profile before the help-request area, and a volunteer profile before the volunteer area. A requester then creates a ticket; a volunteer maintains résumé fields and unavailability periods. Names, cities, addresses, skills, and experience may be entered in Hebrew or English and are stored as written. On SQL Server those columns are bound as NVARCHAR so Hebrew is kept.
 2. **Search:** filters on category, city, urgency, status (requester: own rows; admin: all; volunteer: assigned tasks).
 3. **Table:** queues, candidates per ticket, history.
 4. **Detail:** narrative, scoped location, AI score breakdown for each of the K candidates, concurrency type, exclusion summary when `NO_MATCH`.
@@ -397,7 +402,7 @@ A person with both roles sees a role switcher ("I need help" / "I volunteer") in
 | Recurring requests (`request_series`) | Table reserved; `series_id` stays NULL |
 | Weekly availability slots (e.g. "Tuesday afternoons only") | Possible `volunteer_availability_slots` in v2 |
 | Capacity checked per date | v1 uses current counters; revisit with recurring requests |
-| Geographic radius | v1 uses exact city match |
+| Geographic radius | v1 matches the same municipality, including Hebrew and English names; a radius is deferred |
 | Stuck proposals / tasks (timeouts, reminders, task-level `OVERDUE`) | v2 |
 | No-show handling, reopening a `COMPLETED` request | v2 |
 | Feedback / rating of volunteers | v2 |

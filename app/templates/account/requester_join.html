@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}{{ t("requester.title") }} · KindBridge{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-12 col-lg-7">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body p-4">
+        <h1 class="h4 mb-1">{{ t("requester.title") }}</h1>
+        <p class="text-body-secondary small mb-4">{{ t("requester.lead") }}</p>
+        <div id="form-error" class="alert alert-danger d-none" role="alert"></div>
+        <form id="requester-form" novalidate>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label for="default_city" class="form-label">{{ t("field.city") }}</label>
+              <input id="default_city" name="default_city" class="form-control" value="{{ account.city or '' }}" dir="auto" required aria-describedby="city-help">
+              <div id="city-help" class="form-text">{{ t("field.city_help") }}</div>
+              <div class="invalid-feedback" data-field="default_city"></div>
+            </div>
+            <div class="col-md-6">
+              <label for="default_address" class="form-label">{{ t("requester.address") }}</label>
+              <input id="default_address" name="default_address" class="form-control" value="{{ account.home_address or '' }}" dir="auto" required>
+              <div class="invalid-feedback" data-field="default_address"></div>
+            </div>
+            <div class="col-12">
+              <label for="accessibility_notes" class="form-label">{{ t("requester.access") }}</label>
+              <textarea id="accessibility_notes" name="accessibility_notes" class="form-control" rows="3" dir="auto" aria-describedby="access-help"></textarea>
+              <div id="access-help" class="form-text">{{ t("requester.access_help") }}</div>
+              <div class="invalid-feedback" data-field="accessibility_notes"></div>
+            </div>
+            <div class="col-md-6">
+              <label for="emergency_contact_name" class="form-label">{{ t("requester.emergency_name") }}</label>
+              <input id="emergency_contact_name" name="emergency_contact_name" class="form-control" dir="auto">
+              <div class="invalid-feedback" data-field="emergency_contact_name"></div>
+            </div>
+            <div class="col-md-6">
+              <label for="emergency_contact_phone" class="form-label">{{ t("requester.emergency_phone") }}</label>
+              <input id="emergency_contact_phone" name="emergency_contact_phone" type="tel" class="form-control">
+              <div class="invalid-feedback" data-field="emergency_contact_phone"></div>
+            </div>
+          </div>
+          <div class="d-flex gap-2 mt-4">
+            <button type="submit" class="btn btn-kb">{{ t("requester.save") }}</button>
+            <a class="btn btn-outline-secondary" href="{{ url_for('account.profile_page') }}">{{ t("requester.back") }}</a>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  KB.bindForm("requester-form", "/api/me/requester", (form) => ({
+    default_city: form.default_city.value,
+    default_address: form.default_address.value,
+    accessibility_notes: form.accessibility_notes.value,
+    emergency_contact_name: form.emergency_contact_name.value,
+    emergency_contact_phone: form.emergency_contact_phone.value,
+  }), () => { window.location.href = "/me/requests"; });
+</script>
+{% endblock %}

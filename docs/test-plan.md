@@ -6,13 +6,14 @@ Stack: pytest + Flask test client + SQL Server test DB or LocalDB. Agent tests m
 
 ## Auth
 
-- Register requester and volunteer; reject duplicate email; reject admin self-register.
+- Register a person with residence city and home address only; reject volunteer fields, a missing residence, a duplicate email, and admin self-register. Admin seed leaves `city` and `home_address` null. The account page updates name, phone, city, and home address, and refuses an email change. Requester and volunteer profiles are saved from the account entries.
 - Login sets HttpOnly cookie; bad password 401; lockout after 5 failures.
 - Requester cannot GET another requester’s detail (403).
 - Volunteer cannot POST `/api/requests/<id>/approve` (403).
 
 ## Requests and matching
 
+- Hebrew and English names of the same city pass the geography check; Hebrew and English names of the same skill count as overlap.
 - Submit creates `HelpRequestCreated` and projection `PENDING_REVIEW`.
 - Propose with three eligible volunteers writes K≤3 `PROPOSED` and status `MATCH_PROPOSED`.
 - Propose with empty pool → `NO_MATCH`.

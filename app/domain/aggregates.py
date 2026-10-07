@@ -150,17 +150,35 @@ class UserAggregate:
         email: str,
         full_name: str,
         phone_encrypted: str,
+        city: str,
+        home_address: str,
         password_hash: str,
-        volunteer_profile: dict[str, Any] | None,
         now: datetime,
     ) -> list[DomainEvent]:
         payloads: list[tuple[str, dict[str, Any]]] = [
-            (ev.USER_REGISTERED, {"email": email, "full_name": full_name, "phone_encrypted": phone_encrypted}),
+            (
+                ev.USER_REGISTERED,
+                {
+                    "email": email,
+                    "full_name": full_name,
+                    "phone_encrypted": phone_encrypted,
+                    "city": city,
+                    "home_address": home_address,
+                },
+            ),
             (ev.CREDENTIAL_SET, {"password_hash": password_hash}),
         ]
-        if volunteer_profile is not None:
-            payloads.append((ev.VOLUNTEER_PROFILE_ENABLED, volunteer_profile))
         return UserAggregate._number(user_id, payloads, start_version=1, now=now)
+
+    @staticmethod
+    def record(
+        user_id: UUID,
+        current_version: int,
+        event_type: str,
+        payload: dict[str, Any],
+        now: datetime,
+    ) -> DomainEvent:
+        return UserAggregate._number(user_id, [(event_type, payload)], current_version + 1, now)[0]
 
     @staticmethod
     def bootstrap_admin(
@@ -172,7 +190,16 @@ class UserAggregate:
         now: datetime,
     ) -> list[DomainEvent]:
         payloads = [
-            (ev.USER_REGISTERED, {"email": email, "full_name": full_name, "phone_encrypted": phone_encrypted}),
+            (
+                ev.USER_REGISTERED,
+                {
+                    "email": email,
+                    "full_name": full_name,
+                    "phone_encrypted": phone_encrypted,
+                    "city": None,
+                    "home_address": None,
+                },
+            ),
             (ev.CREDENTIAL_SET, {"password_hash": password_hash}),
             (ev.ADMIN_BOOTSTRAPPED, {}),
         ]

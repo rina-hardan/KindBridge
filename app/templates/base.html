@@ -14,14 +14,38 @@
 <body class="bg-body-tertiary">
   <nav class="navbar border-bottom bg-white">
     <div class="container">
-      <a class="navbar-brand fw-semibold kb-brand" href="{{ url_for('auth.login_page') }}">KindBridge</a>
-      {% block nav %}{% endblock %}
+      <a class="navbar-brand fw-semibold kb-brand" href="{{ url_for('account.profile_page') if identity else url_for('auth.login_page') }}">KindBridge</a>
+      <div class="d-flex align-items-center gap-2">
+        {% block nav %}{% endblock %}
+        <button id="lang-switch" class="btn btn-link btn-sm text-body-secondary" type="button">{{ t("nav.language") }}</button>
+        {% if identity %}
+        <button id="logout" class="btn btn-outline-secondary btn-sm" type="button">{{ t("nav.logout") }}</button>
+        {% endif %}
+      </div>
     </div>
   </nav>
   <main class="container py-5">
     {% block content %}{% endblock %}
   </main>
+  <script>
+    window.KB_TEXT = {{ kb_text | tojson }};
+  </script>
   <script src="{{ url_for('static', filename='js/api.js') }}"></script>
+  <script>
+    document.getElementById("lang-switch").addEventListener("click", () => {
+      const next = document.documentElement.lang === "he" ? "en" : "he";
+      document.cookie = "kb_lang=" + next + ";path=/;max-age=31536000;samesite=lax";
+      window.location.reload();
+    });
+  </script>
+  {% if identity %}
+  <script>
+    document.getElementById("logout").addEventListener("click", async () => {
+      await KB.post("/api/auth/logout", {});
+      window.location.href = "/login";
+    });
+  </script>
+  {% endif %}
   {% block scripts %}{% endblock %}
 </body>
 </html>

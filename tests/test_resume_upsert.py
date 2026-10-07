@@ -9,8 +9,8 @@ from sqlalchemy import func, select
 from app import build_services, create_app
 from app.infrastructure.vector_store import COLLECTION_NAME, ChromaVolunteerVectorStore, resume_document
 from app.repositories.tables import users, volunteer_profiles
-from tests.conftest import REQUESTER, VOLUNTEER, csrf_post
-from tests.test_auth import register
+from tests.conftest import REQUESTER, VOLUNTEER, VOLUNTEER_PROFILE, csrf_post
+from tests.test_auth import login, register
 
 
 class RecordingResumes:
@@ -33,9 +33,12 @@ def _client(config, engine, clock, resumes):
     return client
 
 
-def test_volunteer_registration_upserts_resume(config, engine, clock):
+def test_enabling_volunteer_upserts_resume(config, engine, clock):
     resumes = RecordingResumes()
-    response = register(_client(config, engine, clock, resumes), VOLUNTEER)
+    client = _client(config, engine, clock, resumes)
+    register(client, VOLUNTEER)
+    login(client, VOLUNTEER["email"], VOLUNTEER["password"])
+    response = csrf_post(client, "/api/me/volunteer", VOLUNTEER_PROFILE)
 
     assert response.status_code == 201
     assert len(resumes.calls) == 1
@@ -58,10 +61,12 @@ def test_requester_registration_does_not_upsert(config, engine, clock):
     assert resumes.calls == []
 
 
-def test_chroma_outage_keeps_the_registered_volunteer(config, engine, clock, caplog):
+def test_chroma_outage_keeps_the_enabled_volunteer(config, engine, clock, caplog):
     client = _client(config, engine, clock, UnavailableResumes())
+    register(client, VOLUNTEER)
+    login(client, VOLUNTEER["email"], VOLUNTEER["password"])
     with caplog.at_level(logging.ERROR, logger="app.commands.user_commands"):
-        response = register(client, VOLUNTEER)
+        response = csrf_post(client, "/api/me/volunteer", VOLUNTEER_PROFILE)
 
     assert response.status_code == 201
     assert "vector_store_unavailable" in caplog.text

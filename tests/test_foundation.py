@@ -28,7 +28,13 @@ def _registered(user_id: UUID | None = None, email: str = "ada@kindbridge.org") 
     user = User(user_id or uuid4())
     user.raise_event(
         "UserRegistered",
-        {"email": email, "full_name": "Ada", "phone_encrypted": "cipher"},
+        {
+            "email": email,
+            "full_name": "Ada",
+            "phone_encrypted": "cipher",
+            "city": "Haifa",
+            "home_address": "1 Harbor Rd",
+        },
     )
     return user
 
@@ -172,6 +178,8 @@ def test_commit_passes_events_then_connection_to_the_projector(engine):
     assert row.created_at == created_at.astimezone(timezone.utc).replace(tzinfo=None)
     assert row.email == "ada@kindbridge.org"
     assert row.full_name == "Ada"
+    assert row.city == "Haifa"
+    assert row.home_address == "1 Harbor Rd"
     assert row.password_hash == "hashed"
     assert store.load_stream(user.aggregate_id)[1].event_type == "CredentialSet"
 

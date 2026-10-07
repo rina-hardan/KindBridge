@@ -6,9 +6,9 @@ from sqlalchemy import select, update
 
 from app.commands.dtos import BootstrapAdminCommand
 from app.domain.errors import AdminAlreadyExists, EmailAlreadyRegistered
-from app.repositories.tables import event_store, login_attempts, users, volunteer_profiles
+from app.repositories.tables import event_store, login_attempts, users
 from app.security.auth import ACCESS_COOKIE, require_auth
-from tests.conftest import REQUESTER, VOLUNTEER, csrf_post
+from tests.conftest import REQUESTER, VOLUNTEER, VOLUNTEER_PROFILE, csrf_post
 
 
 def register(client, payload):
@@ -37,8 +37,46 @@ def test_register_requester_creates_events_and_projection(client, engine):
     assert [(r.event_type, r.version) for r in rows] == [("UserRegistered", 1), ("CredentialSet", 2)]
     assert str(rows[0].aggregate_id).replace("-", "") == user_id.replace("-", "")
     assert user.email == "dana@example.com"
+    assert user.city == "Haifa"
+    assert user.home_address == "12 Herzl Street"
     assert user.is_admin is False
     assert user.password_hash.startswith("$2")
+    registered = json.loads(rows[0].payload_json)
+    assert registered["city"] == "Haifa"
+    assert registered["home_address"] == "12 Herzl Street"
+
+
+def test_register_keeps_hebrew_name_city_and_address(client, engine):
+    payload = dict(
+        REQUESTER,
+        email="rina@example.com",
+        full_name="רינה לוי",
+        city="חיפה",
+        home_address="רחוב הרצל 12",
+    )
+
+    response = register(client, payload)
+
+    assert response.status_code == 201
+    with engine.connect() as conn:
+        user = conn.execute(select(users)).one()
+        stored = conn.execute(
+            select(event_store.c.payload_json).where(event_store.c.event_type == "UserRegistered")
+        ).scalar_one()
+    assert user.full_name == "רינה לוי"
+    assert user.city == "חיפה"
+    assert user.home_address == "רחוב הרצל 12"
+    assert "רינה לוי" in stored
+    assert "חיפה" in stored
+
+
+def test_register_page_accepts_either_language(client):
+    hebrew = client.get("/register")
+    assert "אפשר בעברית או באנגלית".encode() in hebrew.data
+
+    client.set_cookie("kb_lang", "en")
+    english = client.get("/register")
+    assert b"Hebrew or English" in english.data
 
 
 def test_register_never_stores_plaintext_password_or_phone(client, engine):
@@ -52,18 +90,11 @@ def test_register_never_stores_plaintext_password_or_phone(client, engine):
     assert stored_phone != REQUESTER["phone"]
 
 
-def test_register_volunteer_projects_profile(client, engine):
-    response = register(client, VOLUNTEER)
+def test_register_rejects_volunteer_fields(client):
+    response = register(client, dict(REQUESTER, volunteer_profile=VOLUNTEER_PROFILE))
 
-    assert response.status_code == 201
-    with engine.connect() as conn:
-        profile = conn.execute(select(volunteer_profiles)).one()
-        event_types = list(conn.execute(select(event_store.c.event_type).order_by(event_store.c.version)).scalars())
-    assert event_types == ["UserRegistered", "CredentialSet", "VolunteerProfileEnabled"]
-    assert profile.primary_city == "Haifa"
-    assert json.loads(profile.skills_json) == ["first aid", "driving"]
-    assert profile.max_active_tasks == 1
-    assert profile.max_parallel_tasks == 2
+    assert response.status_code == 400
+    assert "volunteer_profile" in response.get_json()["fields"]
 
 
 def test_register_duplicate_email_is_case_insensitive(client):
@@ -88,7 +119,7 @@ def test_register_validates_fields(client):
     response = register(client, {"email": "not-an-email", "password": "short", "full_name": " ", "phone": "abc"})
 
     assert response.status_code == 400
-    assert set(response.get_json()["fields"]) == {"email", "password", "full_name", "phone"}
+    assert set(response.get_json()["fields"]) == {"email", "password", "full_name", "phone", "city", "home_address"}
 
 
 def test_register_rejects_password_over_bcrypt_limit(client):
@@ -98,17 +129,8 @@ def test_register_rejects_password_over_bcrypt_limit(client):
     assert "password" in response.get_json()["fields"]
 
 
-def test_register_validates_volunteer_profile(client):
-    payload = json.loads(json.dumps(VOLUNTEER))
-    payload["volunteer_profile"]["base_frequency"] = "DAILY"
-    payload["volunteer_profile"]["max_active_tasks"] = 0
-
-    response = register(client, payload)
-
-    fields = response.get_json()["fields"]
-    assert response.status_code == 400
-    assert "volunteer_profile.base_frequency" in fields
-    assert "volunteer_profile.max_active_tasks" in fields
+def enable_volunteer(client, profile=None):
+    return csrf_post(client, "/api/me/volunteer", profile or VOLUNTEER_PROFILE)
 
 
 # --- CSRF -----------------------------------------------------------------------------------
@@ -182,12 +204,15 @@ def test_login_cookie_is_secure_when_configured(config, engine, clock):
     assert "Secure" in access_header
 
 
-def test_volunteer_gets_both_roles(client):
+def test_volunteer_gets_both_roles_after_enrollment(client):
     register(client, VOLUNTEER)
+    login(client, VOLUNTEER["email"], VOLUNTEER["password"])
 
-    response = login(client, VOLUNTEER["email"], VOLUNTEER["password"])
+    response = enable_volunteer(client)
 
+    assert response.status_code == 201
     assert response.get_json()["roles"] == ["REQUESTER", "VOLUNTEER"]
+    assert client.get("/api/auth/me").get_json()["roles"] == ["REQUESTER", "VOLUNTEER"]
 
 
 def test_login_appends_audit_event(client, engine):
@@ -299,7 +324,7 @@ def test_me_returns_identity_after_login(client):
     response = client.get("/api/auth/me")
 
     assert response.status_code == 200
-    assert response.get_json()["roles"] == ["REQUESTER", "VOLUNTEER"]
+    assert response.get_json()["roles"] == ["REQUESTER"]
 
 
 def test_expired_token_is_rejected(client, app):
@@ -384,7 +409,15 @@ def test_bootstrap_admin_writes_admin_event(app, engine):
 
     with engine.connect() as conn:
         event_types = list(conn.execute(select(event_store.c.event_type).order_by(event_store.c.version)).scalars())
+        user = conn.execute(select(users)).one()
+        registered = json.loads(
+            conn.execute(select(event_store.c.payload_json).where(event_store.c.event_type == "UserRegistered")).scalar_one()
+        )
     assert event_types == ["UserRegistered", "CredentialSet", "AdminBootstrapped"]
+    assert user.city is None
+    assert user.home_address is None
+    assert registered["city"] is None
+    assert registered["home_address"] is None
 
 
 # --- Views ----------------------------------------------------------------------------------
@@ -398,8 +431,21 @@ def test_auth_pages_render(client, path):
     assert b"KindBridge" in response.data
 
 
-def test_hebrew_browser_gets_rtl_layout(client):
+def test_screens_are_hebrew_and_rtl(client):
     response = client.get("/login", headers={"Accept-Language": "he-IL,he;q=0.9"})
 
     assert b'dir="rtl"' in response.data
+    assert b'lang="he"' in response.data
     assert b"bootstrap.rtl.min.css" in response.data
+    assert "כניסה".encode() in response.data
+    assert "יצירת חשבון".encode() in response.data
+
+
+def test_english_cookie_switches_screens_to_ltr(client):
+    client.set_cookie("kb_lang", "en")
+    response = client.get("/login")
+
+    assert b'dir="ltr"' in response.data
+    assert b'lang="en"' in response.data
+    assert b">Log in<" in response.data
+    assert "כניסה".encode() not in response.data

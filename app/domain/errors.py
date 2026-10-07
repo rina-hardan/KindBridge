@@ -66,3 +66,10 @@ class EmailAlreadyRegistered(DomainError):
 class AdminAlreadyExists(DomainError):
     status_code = 409
     code = "admin_exists"
+
+
+class ProfileAlreadyEnabled(DomainError):
+    """A volunteer profile already exists for this person."""
+
+    status_code = 409
+    code = "profile_exists"

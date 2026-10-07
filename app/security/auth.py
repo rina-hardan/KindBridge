@@ -3,9 +3,23 @@ from typing import Callable
 
 from flask import current_app, g, jsonify, request
 
+from app.i18n import localize
 from app.security.tokens import Identity, InvalidToken, TokenService
 
 ACCESS_COOKIE = "kb_access"
+
+
+def set_access_cookie(response, token: str, *, max_age: int, secure: bool):
+    response.set_cookie(
+        ACCESS_COOKIE,
+        token,
+        max_age=max_age,
+        httponly=True,
+        secure=secure,
+        samesite="Lax",
+        path="/",
+    )
+    return response
 
 
 def _token_service() -> TokenService:
@@ -33,9 +47,9 @@ def require_auth(*allowed_roles: str) -> Callable:
         def wrapper(*args, **kwargs):
             identity = current_identity()
             if identity is None:
-                return jsonify(error="unauthorized", message="Login required"), 401
+                return jsonify(error="unauthorized", message=localize("Login required")), 401
             if allowed_roles and not identity.has_any(*allowed_roles):
-                return jsonify(error="forbidden", message="Your role cannot perform this action"), 403
+                return jsonify(error="forbidden", message=localize("Your role cannot perform this action")), 403
             return view(*args, **kwargs)
 
         return wrapper

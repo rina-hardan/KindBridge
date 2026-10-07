@@ -1,6 +1,6 @@
 # UI/UX specification: KindBridge
 
-Goal: professional, calm civic-ops UI (not a marketing landing page). Hebrew-capable layout (`dir=rtl` when `Accept-Language` starts with `he`), otherwise LTR English. Shared app chrome: logo KindBridge, role badge, logout.
+Goal: professional, calm civic-ops UI (not a marketing landing page). Screen copy is Hebrew and the layout is right-to-left (`lang=he`, Bootstrap RTL). The navbar language control stores a `kb_lang` cookie and can switch the same screens to English, left-to-right. Free-text fields accept Hebrew or English in either screen language. City and skill matching treats the two languages as the same value for the shared vocabulary. Shared app chrome: logo KindBridge, language control, role badge, logout.
 
 ## Technical approach
 
@@ -34,7 +34,12 @@ Goal: professional, calm civic-ops UI (not a marketing landing page). Hebrew-cap
 | Route | Content |
 | :--- | :--- |
 | `/login` | Email, password, link to register |
-| `/register` | Role toggle Requester / Volunteer; volunteer fields: city, skills, experience (résumé), vehicle, frequency |
+| `/register` | Person only. Full name, email, phone, password, residence city, home address. No requester or volunteer fields. Admin is seeded and has no residence fields |
+| `/me` | Account. Personal details, with email shown and not editable. Name, phone, city, and home address can be saved. Beside the form, two entries: ask for help, and volunteer |
+| `/me/requester` | Entry when the person has no requester profile. Saves default city, default address, accessibility notes, and emergency contact, then opens `/me/requests` |
+| `/me/volunteer` | Entry when the person has no volunteer profile. Saves city (starts as the residence city), skills, experience, vehicle, and frequency, then opens `/me/tasks` |
+| `/me/requests` | Help-request area, only after a requester profile exists. The request table, create, update, and cancel actions below are the next screen and are not on this page yet |
+| `/me/tasks` | Volunteer area, only after a volunteer profile exists. The task table and complete/release actions below are the next screen and are not on this page yet |
 
 ### Requester
 

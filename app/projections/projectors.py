@@ -4,11 +4,11 @@ from collections.abc import Sequence
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import Connection, insert, update
+from sqlalchemy import Connection, insert, select, update
 
 from app.domain import events as ev
 from app.domain.events import DomainEvent
-from app.repositories.tables import users, volunteer_profiles
+from app.repositories.tables import requester_profiles, users, volunteer_profiles
 
 
 def _naive_utc(value: datetime) -> datetime:
@@ -19,7 +19,7 @@ def _naive_utc(value: datetime) -> datetime:
 
 
 class UserProjector:
-    """Builds the users and volunteer_profiles read models from User-stream events.
+    """Builds the users, requester_profiles, and volunteer_profiles read models from User-stream events.
 
     ``apply(events, connection)`` matches ``EventStore.append`` and
     ``CommandBus.commit``, so a handler can pass the instance as ``projector=``.
@@ -28,9 +28,11 @@ class UserProjector:
     def __init__(self) -> None:
         self._handlers = {
             ev.USER_REGISTERED: self._on_UserRegistered,
+            ev.USER_DETAILS_UPDATED: self._on_UserDetailsUpdated,
             ev.CREDENTIAL_SET: self._on_CredentialSet,
             ev.ADMIN_BOOTSTRAPPED: self._on_AdminBootstrapped,
             ev.VOLUNTEER_PROFILE_ENABLED: self._on_VolunteerProfileEnabled,
+            ev.REQUESTER_PROFILE_UPDATED: self._on_RequesterProfileUpdated,
         }
 
     def __call__(self, events: Sequence[DomainEvent], connection: Any) -> None:
@@ -50,9 +52,24 @@ class UserProjector:
                 password_hash="",
                 full_name=event.payload["full_name"],
                 phone=event.payload["phone_encrypted"],
+                city=event.payload["city"],
+                home_address=event.payload["home_address"],
                 is_admin=False,
                 is_active=True,
                 created_at=_naive_utc(event.created_at),
+            )
+        )
+
+    def _on_UserDetailsUpdated(self, conn: Connection, event: DomainEvent) -> None:
+        payload = event.payload
+        conn.execute(
+            update(users)
+            .where(users.c.id == event.aggregate_id)
+            .values(
+                full_name=payload["full_name"],
+                phone=payload["phone_encrypted"],
+                city=payload["city"],
+                home_address=payload["home_address"],
             )
         )
 
@@ -66,6 +83,16 @@ class UserProjector:
 
     def _on_VolunteerProfileEnabled(self, conn: Connection, event: DomainEvent) -> None:
         p = event.payload
+        existing = conn.execute(
+            select(volunteer_profiles.c.id).where(volunteer_profiles.c.user_id == event.aggregate_id)
+        ).first()
+        if existing is not None:
+            conn.execute(
+                update(volunteer_profiles)
+                .where(volunteer_profiles.c.user_id == event.aggregate_id)
+                .values(is_enabled=True)
+            )
+            return
         conn.execute(
             insert(volunteer_profiles).values(
                 id=uuid.UUID(p["profile_id"]),
@@ -82,4 +109,30 @@ class UserProjector:
                 current_active_tasks=0,
                 current_parallel_tasks=0,
             )
+        )
+
+    def _on_RequesterProfileUpdated(self, conn: Connection, event: DomainEvent) -> None:
+        payload = event.payload
+        values = {
+            "default_city": payload["default_city"],
+            "default_address": payload["default_address"],
+            "accessibility_notes": payload["accessibility_notes"],
+            "emergency_contact_name": payload["emergency_contact_name"],
+            "emergency_contact_phone": payload["emergency_contact_phone_encrypted"],
+            "updated_at": _naive_utc(event.created_at),
+        }
+        existing = conn.execute(
+            select(requester_profiles.c.id).where(requester_profiles.c.user_id == event.aggregate_id)
+        ).first()
+        if existing is None:
+            conn.execute(
+                insert(requester_profiles).values(
+                    id=uuid.UUID(payload["profile_id"]),
+                    user_id=event.aggregate_id,
+                    **values,
+                )
+            )
+            return
+        conn.execute(
+            update(requester_profiles).where(requester_profiles.c.user_id == event.aggregate_id).values(**values)
         )

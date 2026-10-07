@@ -1,7 +1,7 @@
 from flask import Blueprint, current_app, g, jsonify, redirect, render_template, request, url_for
 
 from app.commands.dtos import LoginCommand, RegisterUserCommand
-from app.security.auth import ACCESS_COOKIE, current_identity, require_auth
+from app.security.auth import ACCESS_COOKIE, current_identity, require_auth, set_access_cookie
 from app.security.csrf import CSRF_COOKIE, new_csrf_token
 
 auth_bp = Blueprint("auth", __name__)
@@ -11,24 +11,34 @@ def _services():
     return current_app.extensions["kindbridge"]
 
 
+def _session_response(user_id, roles, *, status: int = 200, rotate_csrf: bool = False, **extra):
+    services = _services()
+    token = services.tokens.issue(user_id, roles)
+    response = jsonify(user_id=str(user_id), roles=roles, **extra)
+    response.status_code = status
+    set_access_cookie(
+        response,
+        token,
+        max_age=int(services.tokens.ttl.total_seconds()),
+        secure=services.config.cookie_secure,
+    )
+    if rotate_csrf:
+        g.new_csrf_token = new_csrf_token()
+    return response
+
+
 @auth_bp.get("/login")
 def login_page():
     if current_identity() is not None:
-        return redirect(url_for("auth.me_page"))
+        return redirect(url_for("account.profile_page"))
     return render_template("auth/login.html")
 
 
 @auth_bp.get("/register")
 def register_page():
+    if current_identity() is not None:
+        return redirect(url_for("account.profile_page"))
     return render_template("auth/register.html")
-
-
-@auth_bp.get("/me")
-def me_page():
-    identity = current_identity()
-    if identity is None:
-        return redirect(url_for("auth.login_page"))
-    return render_template("auth/me.html", identity=identity)
 
 
 @auth_bp.get("/api/auth/csrf")
@@ -42,28 +52,14 @@ def csrf_token():
 def register():
     command = RegisterUserCommand.from_payload(request.get_json(silent=True))
     result = _services().bus.dispatch(command)
-    return jsonify(user_id=str(result.user_id)), 201
+    return _session_response(result.user_id, result.roles, status=201)
 
 
 @auth_bp.post("/api/auth/login")
 def login():
     command = LoginCommand.from_payload(request.get_json(silent=True))
     result = _services().bus.dispatch(command)
-
-    services = _services()
-    token = services.tokens.issue(result.user_id, result.roles)
-    response = jsonify(user_id=str(result.user_id), full_name=result.full_name, roles=result.roles)
-    response.set_cookie(
-        ACCESS_COOKIE,
-        token,
-        max_age=int(services.tokens.ttl.total_seconds()),
-        httponly=True,
-        secure=services.config.cookie_secure,
-        samesite="Lax",
-        path="/",
-    )
-    g.new_csrf_token = new_csrf_token()
-    return response
+    return _session_response(result.user_id, result.roles, full_name=result.full_name, rotate_csrf=True)
 
 
 @auth_bp.post("/api/auth/logout")

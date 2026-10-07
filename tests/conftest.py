@@ -85,6 +85,8 @@ REQUESTER = {
     "password": "correct-horse-battery",
     "full_name": "Dana Levi",
     "phone": "+972-50-1234567",
+    "city": "Haifa",
+    "home_address": "12 Herzl Street",
 }
 
 VOLUNTEER = {
@@ -92,11 +94,22 @@ VOLUNTEER = {
     "password": "volunteer-pass-123",
     "full_name": "Yossi Cohen",
     "phone": "052-7654321",
-    "volunteer_profile": {
-        "primary_city": "Haifa",
-        "has_vehicle": True,
-        "skills": ["First Aid", "driving"],
-        "experience": "Five years with Magen David Adom as a volunteer medic.",
-        "base_frequency": "WEEKLY",
-    },
+    "city": "Haifa",
+    "home_address": "4 Allenby Street",
+}
+
+VOLUNTEER_PROFILE = {
+    "primary_city": "Haifa",
+    "has_vehicle": True,
+    "skills": ["First Aid", "driving"],
+    "experience": "Five years with Magen David Adom as a volunteer medic.",
+    "base_frequency": "WEEKLY",
+}
+
+REQUESTER_PROFILE = {
+    "default_city": "Haifa",
+    "default_address": "12 Herzl Street",
+    "accessibility_notes": "Ground floor only",
+    "emergency_contact_name": "Noa Levi",
+    "emergency_contact_phone": "050-1112233",
 }

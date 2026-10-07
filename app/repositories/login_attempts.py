@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Connection, func, insert, select
+from sqlalchemy import Connection, false, func, insert, select, true
 
 from app.repositories.tables import login_attempts
 
@@ -15,7 +15,7 @@ class LoginAttemptRepository:
         """Failures after `since` and after the latest success, newest first."""
         last_success = conn.execute(
             select(func.max(login_attempts.c.attempted_at)).where(
-                login_attempts.c.email == email, login_attempts.c.succeeded.is_(True)
+                login_attempts.c.email == email, login_attempts.c.succeeded == true()
             )
         ).scalar()
         lower_bound = max(since, last_success) if last_success else since
@@ -23,7 +23,7 @@ class LoginAttemptRepository:
             select(login_attempts.c.attempted_at)
             .where(
                 login_attempts.c.email == email,
-                login_attempts.c.succeeded.is_(False),
+                login_attempts.c.succeeded == false(),
                 login_attempts.c.attempted_at > lower_bound,
             )
             .order_by(login_attempts.c.attempted_at.desc())

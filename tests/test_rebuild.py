@@ -7,11 +7,13 @@ from sqlalchemy import delete, func, insert, select, text, update
 from app.projections.rebuild import rebuild
 from app.repositories.tables import event_store, login_attempts, users, volunteer_profiles
 from tests.conftest import REQUESTER, VOLUNTEER
-from tests.test_auth import register
+from tests.test_auth import enable_volunteer, login, register
 
 
 def test_rebuild_restores_projections_and_leaves_login_attempts(client, engine):
     register(client, VOLUNTEER)
+    login(client, VOLUNTEER["email"], VOLUNTEER["password"])
+    enable_volunteer(client)
     with engine.begin() as conn:
         before_hash = conn.execute(select(users.c.password_hash)).scalar_one()
         before_events = conn.execute(select(func.count()).select_from(event_store)).scalar_one()
@@ -27,7 +29,7 @@ def test_rebuild_restores_projections_and_leaves_login_attempts(client, engine):
 
     replayed = rebuild(engine)
 
-    assert replayed == before_events == 3
+    assert replayed == before_events == 4
     with engine.connect() as conn:
         user = conn.execute(select(users)).one()
         profile = conn.execute(select(volunteer_profiles)).one()
@@ -35,12 +37,14 @@ def test_rebuild_restores_projections_and_leaves_login_attempts(client, engine):
         events_after = conn.execute(select(func.count()).select_from(event_store)).scalar_one()
     assert events_after == before_events
     assert user.full_name == "Yossi Cohen"
+    assert user.city == "Haifa"
+    assert user.home_address == "4 Allenby Street"
     assert user.email == "yossi@example.com"
     assert user.is_admin is False
     assert user.password_hash == before_hash
     assert profile.primary_city == "Haifa"
     assert profile.is_enabled is True
-    assert attempts == 1
+    assert attempts == 2
 
 
 def test_rebuild_replays_by_seq_when_the_column_exists(client, engine):

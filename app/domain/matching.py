@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from uuid import UUID
 
+from app.domain.bilingual import city_key, skill_key
+
 TOP_N = 15
 PROPOSAL_LIMIT = 3
 
@@ -157,15 +159,21 @@ def cosine_similarity_from_distance(distance: float) -> float:
 
 
 def skill_overlap(required: Sequence[str], offered: Sequence[str]) -> float:
+    """Coverage after Hebrew/English aliases. Unknown words still need the same folded text."""
     if not required:
         return 1.0
-    needed = {item.casefold() for item in required}
-    have = {item.casefold() for item in offered}
+    needed = {skill_key(item) for item in required}
+    have = {skill_key(item) for item in offered}
+    needed.discard("")
+    have.discard("")
+    if not needed:
+        return 0.0
     return len(needed & have) / len(needed)
 
 
 def cities_match(left: str, right: str) -> bool:
-    return left.strip().casefold() == right.strip().casefold()
+    """Same municipality. Known places match across Hebrew and English."""
+    return city_key(left) == city_key(right) and city_key(left) != ""
 
 
 def score_candidate(

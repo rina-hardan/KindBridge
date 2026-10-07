@@ -11,8 +11,10 @@ from app.commands.bus import CommandBus
 from app.commands.match_commands import FallbackRationale, MatchCommandHandlers, TemplateRationale, _LlmSafety
 from app.commands.user_commands import Clock, UserCommandHandlers, utc_now
 from app.config import Config
+from app.controllers.account_controller import account_bp
 from app.controllers.auth_controller import auth_bp
 from app.controllers.errors import register_error_handlers
+from app.i18n import current_lang, localize, translate
 from app.infrastructure.llm import chat_from_settings
 from app.infrastructure.vector_store import ChromaVolunteerVectorStore, NullResumeIndex, ResumeVectorStore
 from app.infrastructure.web_search import TavilySearch
@@ -37,6 +39,7 @@ class Services:
     bus: CommandBus
     tokens: TokenService
     resumes: ResumeVectorStore
+    encryptor: FieldEncryptor
 
 
 def build_services(
@@ -54,6 +57,7 @@ def build_services(
             else ChromaVolunteerVectorStore(config.chroma_host, config.chroma_port)
         )
     bus = CommandBus(event_store)
+    encryptor = FieldEncryptor(config.encryption_key)
     UserCommandHandlers(
         engine=engine,
         event_store=event_store,
@@ -61,7 +65,7 @@ def build_services(
         users=UserRepository(),
         attempts=LoginAttemptRepository(),
         hasher=PasswordHasher(config.bcrypt_rounds),
-        encryptor=FieldEncryptor(config.encryption_key),
+        encryptor=encryptor,
         lockout_max_failures=config.lockout_max_failures,
         lockout_window=timedelta(minutes=config.lockout_window_minutes),
         resumes=resumes,
@@ -90,6 +94,7 @@ def build_services(
         bus=bus,
         tokens=TokenService(config.jwt_secret, config.jwt_ttl_minutes),
         resumes=resumes,
+        encryptor=encryptor,
     )
 
 
@@ -110,6 +115,7 @@ def create_app(
     _install_csrf(app, config)
     _install_text_direction(app)
     app.register_blueprint(auth_bp)
+    app.register_blueprint(account_bp)
     return app
 
 
@@ -120,7 +126,7 @@ def _install_csrf(app: Flask, config: Config) -> None:
     def enforce_csrf():
         if request.method in UNSAFE_METHODS:
             if not tokens_match(request.cookies.get(CSRF_COOKIE), request.headers.get(CSRF_HEADER)):
-                return jsonify(error="csrf_failed", message="Missing or invalid CSRF token"), 403
+                return jsonify(error="csrf_failed", message=localize("Missing or invalid CSRF token")), 403
         return None
 
     @app.after_request
@@ -143,5 +149,16 @@ def _install_csrf(app: Flask, config: Config) -> None:
 def _install_text_direction(app: Flask) -> None:
     @app.context_processor
     def text_direction():
-        lang = request.accept_languages.best_match(["he", "en"]) or "en"
-        return {"lang": lang, "text_dir": "rtl" if lang == "he" else "ltr"}
+        from app.security.auth import current_identity
+
+        lang = current_lang()
+        return {
+            "lang": lang,
+            "text_dir": "rtl" if lang == "he" else "ltr",
+            "identity": current_identity(),
+            "t": translate,
+            "kb_text": {
+                "genericError": translate("js.generic_error"),
+                "networkError": translate("js.network_error"),
+            },
+        }

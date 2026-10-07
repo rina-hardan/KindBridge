@@ -3,6 +3,10 @@
   --kb-accent-hover: #0b5656;
 }
 
+body {
+  font-family: "Segoe UI", "Arial Hebrew", Arial, sans-serif;
+}
+
 .kb-brand {
   color: var(--kb-accent);
 }

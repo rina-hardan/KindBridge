@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}{{ t("profile.title") }} · KindBridge{% endblock %}
+{% block content %}
+<div class="row g-4">
+  <div class="col-lg-8">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body p-4">
+        <h1 class="h4 mb-1">{{ t("profile.title") }}</h1>
+        <p class="text-body-secondary small mb-4">{{ t("profile.lead") }}</p>
+        <div id="form-success" class="alert alert-success d-none" role="status">{{ t("profile.saved") }}</div>
+        <div id="form-error" class="alert alert-danger d-none" role="alert"></div>
+        <form id="account-form" novalidate>
+          <div class="row g-3">
+            <div class="col-12">
+              <label for="email" class="form-label">{{ t("field.email") }}</label>
+              <input id="email" class="form-control" value="{{ account.email }}" readonly>
+            </div>
+            <div class="col-12">
+              <label for="full_name" class="form-label">{{ t("field.full_name") }}</label>
+              <input id="full_name" name="full_name" class="form-control" value="{{ account.full_name }}" autocomplete="name" dir="auto" required>
+              <div class="invalid-feedback" data-field="full_name"></div>
+            </div>
+            <div class="col-md-6">
+              <label for="phone" class="form-label">{{ t("field.phone") }}</label>
+              <input id="phone" name="phone" type="tel" class="form-control" value="{{ account.phone }}" autocomplete="tel" required>
+              <div class="invalid-feedback" data-field="phone"></div>
+            </div>
+            <div class="col-md-6">
+              <label for="city" class="form-label">{{ t("field.city") }}</label>
+              <input id="city" name="city" class="form-control" value="{{ account.city or '' }}" autocomplete="address-level2" dir="auto" aria-describedby="city-help" {% if not account.is_admin %}required{% endif %}>
+              <div id="city-help" class="form-text">{{ t("field.city_help") }}</div>
+              <div class="invalid-feedback" data-field="city"></div>
+            </div>
+            <div class="col-12">
+              <label for="home_address" class="form-label">{{ t("field.home_address") }}</label>
+              <input id="home_address" name="home_address" class="form-control" value="{{ account.home_address or '' }}" autocomplete="street-address" dir="auto" {% if not account.is_admin %}required{% endif %}>
+              <div class="invalid-feedback" data-field="home_address"></div>
+            </div>
+          </div>
+          <button type="submit" class="btn btn-kb mt-4">{{ t("profile.save") }}</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  {% if not account.is_admin %}
+  <div class="col-lg-4">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body p-4 d-grid gap-3">
+        <h2 class="h6 mb-0">{{ t("profile.choose") }}</h2>
+        <div>
+          <a class="btn btn-kb w-100" href="{{ url_for('account.requests_page') if account.has_requester_profile else url_for('account.requester_join_page') }}">
+            {% if account.has_requester_profile %}{{ t("profile.my_requests") }}{% else %}{{ t("profile.ask") }}{% endif %}
+          </a>
+          <p class="form-text mb-0 mt-2">
+            {% if account.has_requester_profile %}{{ t("profile.ask_ready") }}{% else %}{{ t("profile.ask_needed") }}{% endif %}
+          </p>
+        </div>
+        <div>
+          <a class="btn btn-outline-secondary w-100" href="{{ url_for('account.tasks_page') if account.has_volunteer_profile else url_for('account.volunteer_join_page') }}">
+            {% if account.has_volunteer_profile %}{{ t("profile.my_tasks") }}{% else %}{{ t("profile.volunteer") }}{% endif %}
+          </a>
+          <p class="form-text mb-0 mt-2">
+            {% if account.has_volunteer_profile %}{{ t("profile.volunteer_ready") }}{% else %}{{ t("profile.volunteer_needed") }}{% endif %}
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  KB.bindForm("account-form", "/api/me/account", (form) => ({
+    full_name: form.full_name.value,
+    phone: form.phone.value,
+    city: form.city.value,
+    home_address: form.home_address.value,
+  }), () => {
+    document.getElementById("form-success").classList.remove("d-none");
+  });
+</script>
+{% endblock %}

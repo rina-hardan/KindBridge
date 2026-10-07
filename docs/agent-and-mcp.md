@@ -60,7 +60,7 @@ If the LLM call fails or exceeds 10s: use a template rationale (top two score co
 ```
 score = 100 * (
   0.45 * cosine_similarity_clipped   # 0..1 from Chroma
-  + 0.20 * skill_overlap               # |intersection| / |required| (1 if required empty)
+  + 0.20 * skill_overlap               # |intersection| / |required| after Hebrew/English aliases (1 if required empty)
   + 0.15 * travel_feasibility          # 1 if same city; 0.6 if tool distance < 40km; else 0.2
   + 0.10 * urgency_fit                 # EMERGENCY 1.0, HIGH 0.85, NORMAL 0.7, LOW 0.55 (availability already filtered)
   + 0.05 * vehicle_fit                 # 1 if not required or has_vehicle

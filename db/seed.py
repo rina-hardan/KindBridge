@@ -5,6 +5,7 @@ Usage, from the repository root:
 
 Reads ADMIN_BOOTSTRAP_EMAIL (required), ADMIN_BOOTSTRAP_PASSWORD (prompted if missing),
 ADMIN_BOOTSTRAP_NAME and ADMIN_BOOTSTRAP_PHONE (optional) from the environment or .env.
+An admin has no residence city or home address.
 Refuses to run if any admin already exists.
 """
 
@@ -24,7 +25,7 @@ def _password_from_env_or_prompt() -> str:
     password = os.getenv("ADMIN_BOOTSTRAP_PASSWORD")
     if password:
         return password
-    first = getpass.getpass("Admin password (min 10 chars): ")
+    first = getpass.getpass("Admin password (min 6 chars): ")
     second = getpass.getpass("Repeat password: ")
     if first != second:
         sys.exit("Passwords do not match.")

@@ -11,15 +11,31 @@ from sqlalchemy import Engine
 from sqlalchemy.exc import IntegrityError
 
 from app.commands.bus import CommandBus
-from app.commands.dtos import BootstrapAdminCommand, LoginCommand, RegisterUserCommand
+from app.commands.dtos import (
+    BootstrapAdminCommand,
+    EnableVolunteerProfileCommand,
+    LoginCommand,
+    RegisterUserCommand,
+    UpdateAccountDetailsCommand,
+    UpdateRequesterProfileCommand,
+)
 from app.domain.aggregates import UserAggregate
-from app.domain.events import VOLUNTEER_PROFILE_ENABLED, DomainEvent
+from app.domain.events import (
+    REQUESTER_PROFILE_UPDATED,
+    USER_DETAILS_UPDATED,
+    VOLUNTEER_PROFILE_ENABLED,
+    DomainEvent,
+)
 from app.domain.errors import (
     AccountLocked,
     AdminAlreadyExists,
     ConcurrencyConflict,
     EmailAlreadyRegistered,
+    Forbidden,
     InvalidCredentials,
+    NotFound,
+    ProfileAlreadyEnabled,
+    ValidationError,
 )
 from app.domain.roles import derive_roles
 from app.infrastructure.vector_store import ResumeVectorStore
@@ -44,6 +60,19 @@ def utc_now() -> datetime:
 @dataclass(frozen=True)
 class RegisterResult:
     user_id: uuid.UUID
+    roles: list[str]
+
+
+@dataclass(frozen=True)
+class EnableVolunteerResult:
+    profile_id: uuid.UUID
+    roles: list[str]
+
+
+@dataclass(frozen=True)
+class RequesterProfileResult:
+    profile_id: uuid.UUID
+    created: bool
 
 
 @dataclass(frozen=True)
@@ -88,30 +117,21 @@ class UserCommandHandlers:
         bus.register(RegisterUserCommand, self.register_user)
         bus.register(LoginCommand, self.login)
         bus.register(BootstrapAdminCommand, self.bootstrap_admin)
+        bus.register(UpdateAccountDetailsCommand, self.update_account)
+        bus.register(UpdateRequesterProfileCommand, self.update_requester_profile)
+        bus.register(EnableVolunteerProfileCommand, self.enable_volunteer)
 
     def register_user(self, cmd: RegisterUserCommand) -> RegisterResult:
         now = self._clock()
         user_id = uuid.uuid4()
-        volunteer_payload = None
-        if cmd.volunteer_profile is not None:
-            vp = cmd.volunteer_profile
-            volunteer_payload = {
-                "profile_id": str(uuid.uuid4()),
-                "primary_city": vp.primary_city,
-                "has_vehicle": vp.has_vehicle,
-                "skills": list(vp.skills),
-                "experience": vp.experience,
-                "base_frequency": vp.base_frequency,
-                "max_active_tasks": vp.max_active_tasks,
-                "max_parallel_tasks": vp.max_parallel_tasks,
-            }
         events = UserAggregate.register(
             user_id=user_id,
             email=cmd.email,
             full_name=cmd.full_name,
             phone_encrypted=self._encryptor.encrypt(cmd.phone),
+            city=cmd.city,
+            home_address=cmd.home_address,
             password_hash=self._hasher.hash(cmd.password),
-            volunteer_profile=volunteer_payload,
             now=now,
         )
         try:
@@ -122,8 +142,7 @@ class UserCommandHandlers:
                 self._projector.apply(events, conn)
         except IntegrityError as exc:
             raise EmailAlreadyRegistered("This email is already registered") from exc
-        self._index_enabled_profiles(events)
-        return RegisterResult(user_id=user_id)
+        return RegisterResult(user_id=user_id, roles=derive_roles(False, False))
 
     def login(self, cmd: LoginCommand) -> LoginResult:
         now = self._clock()
@@ -163,7 +182,98 @@ class UserCommandHandlers:
                 raise EmailAlreadyRegistered("This email already belongs to a non-admin account")
             self._event_store.append_in(conn, user_id, 0, events)
             self._projector.apply(events, conn)
-        return RegisterResult(user_id=user_id)
+        return RegisterResult(user_id=user_id, roles=derive_roles(True, False))
+
+    def update_account(self, cmd: UpdateAccountDetailsCommand) -> None:
+        now = self._clock()
+        with self._engine.begin() as conn:
+            account = self._require_account(conn, cmd.user_id)
+            if not account.is_admin:
+                errors = {}
+                if not cmd.city:
+                    errors["city"] = "This field is required"
+                if not cmd.home_address:
+                    errors["home_address"] = "This field is required"
+                if errors:
+                    raise ValidationError(errors)
+            self._append_to_user(
+                conn,
+                cmd.user_id,
+                USER_DETAILS_UPDATED,
+                {
+                    "full_name": cmd.full_name,
+                    "phone_encrypted": self._encryptor.encrypt(cmd.phone),
+                    "city": cmd.city,
+                    "home_address": cmd.home_address,
+                },
+                now,
+            )
+
+    def update_requester_profile(self, cmd: UpdateRequesterProfileCommand) -> RequesterProfileResult:
+        now = self._clock()
+        phone_encrypted = (
+            None if cmd.emergency_contact_phone is None else self._encryptor.encrypt(cmd.emergency_contact_phone)
+        )
+        with self._engine.begin() as conn:
+            account = self._require_account(conn, cmd.user_id)
+            if account.is_admin:
+                raise Forbidden("An admin account cannot ask for help")
+            existing = self._users.requester_profile_id(conn, cmd.user_id)
+            profile_id = existing or uuid.uuid4()
+            self._append_to_user(
+                conn,
+                cmd.user_id,
+                REQUESTER_PROFILE_UPDATED,
+                {
+                    "profile_id": str(profile_id),
+                    "default_city": cmd.default_city,
+                    "default_address": cmd.default_address,
+                    "accessibility_notes": cmd.accessibility_notes,
+                    "emergency_contact_name": cmd.emergency_contact_name,
+                    "emergency_contact_phone_encrypted": phone_encrypted,
+                },
+                now,
+            )
+        return RequesterProfileResult(profile_id=profile_id, created=existing is None)
+
+    def enable_volunteer(self, cmd: EnableVolunteerProfileCommand) -> EnableVolunteerResult:
+        now = self._clock()
+        profile_id = uuid.uuid4()
+        vp = cmd.profile
+        payload = {
+            "profile_id": str(profile_id),
+            "primary_city": vp.primary_city,
+            "has_vehicle": vp.has_vehicle,
+            "skills": list(vp.skills),
+            "experience": vp.experience,
+            "base_frequency": vp.base_frequency,
+            "max_active_tasks": vp.max_active_tasks,
+            "max_parallel_tasks": vp.max_parallel_tasks,
+        }
+        with self._engine.begin() as conn:
+            account = self._require_account(conn, cmd.user_id)
+            if account.is_admin:
+                raise Forbidden("An admin account cannot volunteer")
+            if self._users.volunteer_profile_id(conn, cmd.user_id) is not None:
+                raise ProfileAlreadyEnabled("This account is already registered as a volunteer")
+            event = self._append_to_user(conn, cmd.user_id, VOLUNTEER_PROFILE_ENABLED, payload, now)
+        self._index_enabled_profiles([event])
+        return EnableVolunteerResult(profile_id=profile_id, roles=derive_roles(False, True))
+
+    def _require_account(self, conn, user_id: uuid.UUID):
+        account = self._users.get_account(conn, user_id)
+        if account is None or not account.is_active:
+            raise NotFound("User not found")
+        return account
+
+    def _append_to_user(self, conn, user_id: uuid.UUID, event_type: str, payload: dict, now: datetime) -> DomainEvent:
+        version = self._event_store.current_version(conn, user_id)
+        if version < 1:
+            raise NotFound("User not found")
+        event = UserAggregate.record(user_id, version, event_type, payload, now)
+        self._event_store.append_in(conn, user_id, version, [event])
+        self._projector.apply([event], conn)
+        return event
 
     def _index_enabled_profiles(self, events: list[DomainEvent]) -> None:
         """Post-commit side effect. A Chroma failure must not roll back the registration."""
