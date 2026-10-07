@@ -38,16 +38,16 @@ Goal: professional, calm civic-ops UI (not a marketing landing page). Screen cop
 | `/me` | Account. Personal details, with email shown and not editable. Name, phone, city, and home address can be saved. Beside the form, two entries: ask for help, and volunteer |
 | `/me/requester` | Entry when the person has no requester profile. Saves default city, default address, accessibility notes, and emergency contact, then opens `/me/requests` |
 | `/me/volunteer` | Entry when the person has no volunteer profile. Saves city (starts as the residence city), skills, experience, vehicle, and frequency, then opens `/me/tasks` |
-| `/me/requests` | Help-request area, only after a requester profile exists. The request table, create, update, and cancel actions below are the next screen and are not on this page yet |
+| `/me/requests` | Help-request area, only after a requester profile exists. Filterable table of the person's own tickets, a link to create one, and cancel. There is no edit action |
 | `/me/tasks` | Volunteer area, only after a volunteer profile exists. The task table and complete/release actions below are the next screen and are not on this page yet |
 
 ### Requester
 
 | Route | Course map | Content |
 | :--- | :--- | :--- |
-| `/me/requests` | table 4.3, search 4.1 | Filters + table of own tickets |
-| `/me/requests/new` | input 4.5 | Create request form |
-| `/requests/<id>` | detail 4.2 | Status, description; volunteer identity only after ASSIGNED; Cancel button for non-terminal requests |
+| `/me/requests` | table 4.3, search 4.1 | Filters (status, category, urgency, city) and a table of own tickets. Status defaults to open requests (`PENDING_REVIEW`, `MATCH_PROPOSED`, `NO_MATCH`, `ASSIGNED`), so a cancelled ticket leaves the list until that status is chosen. No edit. Cancel confirms, and when the ticket is `ASSIGNED` the confirm says the volunteer will be notified |
+| `/me/requests/new` | input 4.5 | Create request form. City and address start from the requester profile. Submitting opens a new ticket; it does not change an existing one |
+| `/requests/<id>` | detail 4.2 | Status, description; volunteer identity only after ASSIGNED; Cancel button for non-terminal requests. No edit |
 
 ### Volunteer
 

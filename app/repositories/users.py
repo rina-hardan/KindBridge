@@ -85,6 +85,15 @@ class UserRepository:
             is_active=bool(row.is_active),
         )
 
+    def requester_defaults(self, conn: Connection, user_id: uuid.UUID) -> tuple[str | None, str | None] | None:
+        stmt = select(requester_profiles.c.default_city, requester_profiles.c.default_address).where(
+            requester_profiles.c.user_id == user_id
+        )
+        row = conn.execute(stmt).first()
+        if row is None:
+            return None
+        return row.default_city, row.default_address
+
     def requester_profile_id(self, conn: Connection, user_id: uuid.UUID) -> uuid.UUID | None:
         stmt = select(requester_profiles.c.id).where(requester_profiles.c.user_id == user_id)
         row = conn.execute(stmt).first()

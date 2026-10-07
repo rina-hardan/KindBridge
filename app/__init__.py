@@ -9,10 +9,12 @@ from sqlalchemy import Engine
 
 from app.commands.bus import CommandBus
 from app.commands.match_commands import FallbackRationale, MatchCommandHandlers, TemplateRationale, _LlmSafety
+from app.commands.request_commands import RequestCommandHandlers
 from app.commands.user_commands import Clock, UserCommandHandlers, utc_now
 from app.config import Config
 from app.controllers.account_controller import account_bp
 from app.controllers.auth_controller import auth_bp
+from app.controllers.requests_controller import requests_bp
 from app.controllers.errors import register_error_handlers
 from app.i18n import current_lang, localize, translate
 from app.infrastructure.llm import chat_from_settings
@@ -72,6 +74,13 @@ def build_services(
         clock=clock,
         resume_retry_delays=() if config.testing else (0.5, 1.0),
     ).register_on(bus)
+    RequestCommandHandlers(
+        engine=engine,
+        event_store=event_store,
+        projector=MatchProjector(),
+        users=UserRepository(),
+        clock=clock,
+    ).register_on(bus)
     chat = None if config.testing else chat_from_settings(
         config.llm_provider, config.llm_model, config.openai_api_key, config.ollama_base_url
     )
@@ -116,6 +125,7 @@ def create_app(
     _install_text_direction(app)
     app.register_blueprint(auth_bp)
     app.register_blueprint(account_bp)
+    app.register_blueprint(requests_bp)
     return app
 
 

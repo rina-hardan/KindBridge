@@ -57,7 +57,7 @@ Never put a plaintext password in any payload. Password hashes must not appear i
 
 ### HelpRequest
 
-- `HelpRequestCreated`: all request fields (city, address, category, resource_type, description, urgency, dates, required skills, requires_vehicle, requester_id). `address` is plaintext in the payload; queries hide it until the request is `ASSIGNED`.
+- `HelpRequestCreated`: `requester_id`, `city`, `address`, `category`, `resource_type`, `description`, `urgency`, `preferred_date`, `preferred_time_from`, `preferred_time_to`, `estimated_duration_min`, `required_skills`, `requires_vehicle`, `concurrency_type` (`UNKNOWN` at submit), `match_attempt` (`0`). `series_id` stays null. `address` is plaintext in the payload; queries hide it until the request is `ASSIGNED`. v1 does not emit `HelpRequestUpdated`; the owner cancels and submits a new request.
 - `MatchesProposed`: array of `{ volunteer_id, score, rationale, rank }`, `match_attempt`, `k`.
 - `NoMatchFound`: `match_attempt`, `reason`, `rejection_summary` (counts per hard-filter reason).
 - `MatchRetriggered`.

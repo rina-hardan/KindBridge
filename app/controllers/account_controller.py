@@ -5,8 +5,10 @@ from app.commands.dtos import (
     UpdateAccountDetailsCommand,
     UpdateRequesterProfileCommand,
 )
+from app.domain.requests import ALL_STATUSES, CATEGORIES, RESOURCE_TYPES, URGENCIES
 from app.i18n import localize
 from app.queries.account_queries import AccountView, GetMyAccountQuery
+from app.queries.request_queries import GetRequesterDefaultsQuery
 from app.repositories.users import UserRepository
 from app.security.auth import current_identity, require_auth, set_access_cookie
 
@@ -137,7 +139,34 @@ def requests_page():
         return admin
     if not account.has_requester_profile:
         return redirect(url_for("account.requester_join_page"))
-    return render_template("account/requests_home.html")
+    return render_template(
+        "account/requests_home.html",
+        categories=CATEGORIES,
+        urgencies=URGENCIES,
+        statuses=ALL_STATUSES,
+    )
+
+
+@account_bp.get("/me/requests/new")
+def new_request_page():
+    account, bounce = _account_or_login()
+    if bounce is not None:
+        return bounce
+    admin = _redirect_admin(account)
+    if admin is not None:
+        return admin
+    if not account.has_requester_profile:
+        return redirect(url_for("account.requester_join_page"))
+    defaults = GetRequesterDefaultsQuery(_services().engine, UserRepository()).execute(account.user_id)
+    if defaults is None:
+        return redirect(url_for("account.requester_join_page"))
+    return render_template(
+        "account/request_new.html",
+        defaults=defaults,
+        categories=CATEGORIES,
+        urgencies=URGENCIES,
+        resource_types=RESOURCE_TYPES,
+    )
 
 
 @account_bp.get("/me/tasks")

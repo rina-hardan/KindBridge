@@ -276,7 +276,6 @@ flowchart LR
   proposed -->|approve_or_override| assigned[ASSIGNED]
   proposed -->|reject| pending
   proposed -->|retrigger| pending
-  proposed -->|edit request| pending
   assigned -->|complete| done[COMPLETED]
   assigned -->|release| pending
   pending --> cancelled[CANCELLED]
@@ -289,8 +288,7 @@ flowchart LR
 | :--- | :--- | :--- | :--- | :--- |
 | - | `RegisterUserCommand` | `UserRegistered` (+ `VolunteerProfileEnabled` if the form includes a volunteer profile) | (user exists) | No role in payload. `is_admin` is never set here. `city` and `home_address` are required. The admin seed does not set them |
 | - | `LoginCommand` | `UserLoggedIn` | - | Audit only; no domain status |
-| - | `SubmitHelpRequestCommand` | `HelpRequestCreated` | `PENDING_REVIEW` | Non-admin only; enqueue agent |
-| `PENDING_REVIEW`, `NO_MATCH`, `MATCH_PROPOSED` | `UpdateHelpRequestCommand` | `HelpRequestUpdated` | `PENDING_REVIEW` | **[NEW]** Owner only. Not allowed once `ASSIGNED` (cancel and recreate). Open `PROPOSED` rows -> `SUPERSEDED`; concurrency type reclassified; agent re-queued |
+| - | `SubmitHelpRequestCommand` | `HelpRequestCreated` | `PENDING_REVIEW` | Non-admin with a requester profile; enqueue agent |
 | `PENDING_REVIEW` | `ClassifyConcurrencyCommand` | `ConcurrencyClassified` | (unchanged) | **[NEW]** Agent or admin. See 4.4 |
 | `PENDING_REVIEW` | `ProposeMatchCommand` | `MatchesProposed` | `MATCH_PROPOSED` | Agent only; writes 1..K `PROPOSED` rows; increments `match_attempt`; applies the hard filter in 4.2 |
 | `PENDING_REVIEW` | `ProposeMatchCommand` (empty pool) | `NoMatchFound` | `NO_MATCH` | Admin notified; no assignment rows; payload carries the **rejection summary** (counts per filter reason) |
@@ -301,6 +299,8 @@ flowchart LR
 | `ASSIGNED` | `CompleteTaskCommand` | `TaskCompleted` | `COMPLETED` | Assigned volunteer only; decrement counter; request terminal |
 | `ASSIGNED` | `ReleaseTaskCommand` | `TaskReleased` | `PENDING_REVIEW` | Assigned volunteer; assignment -> `DECLINED`; volunteer blacklisted on this request; decrement counter; re-queue; notify requester |
 | Open states | `CancelRequestCommand` | `HelpRequestCancelled` | `CANCELLED` | Owner (or admin); if `ASSIGNED`, notify volunteer via Gmail and free capacity; open proposals -> `SUPERSEDED` |
+
+**No edit in v1.** The owner does not change a request in place. To replace one, they cancel it and submit a new ticket. There is no `UpdateHelpRequestCommand` and no `HelpRequestUpdated` event.
 
 **Concurrency control:** optimistic version on the request aggregate (`match_attempt` + event stream version). A second approve/override fails with 409.
 
@@ -368,7 +368,7 @@ Only volunteers who passed 4.2 are ranked. Inputs: semantic similarity between t
 `EnableVolunteerProfileCommand` [NEW], `UpdateVolunteerProfileCommand`, `DisableVolunteerProfileCommand` [NEW],
 `AddVolunteerUnavailabilityCommand` [NEW], `CancelVolunteerUnavailabilityCommand` [NEW],
 `UpdateRequesterProfileCommand` [NEW],
-`SubmitHelpRequestCommand`, `UpdateHelpRequestCommand` [NEW], `CancelRequestCommand`,
+`SubmitHelpRequestCommand`, `CancelRequestCommand`,
 `ClassifyConcurrencyCommand` [NEW] (agent/admin),
 `ProposeMatchCommand` (agent), `RetriggerMatchCommand`, `ApproveAssignmentCommand`, `RejectAssignmentCommand`, `OverrideAssignmentCommand`,
 `CompleteTaskCommand`, `ReleaseTaskCommand`,
@@ -377,15 +377,15 @@ Only volunteers who passed 4.2 are ranked. Inputs: semantic similarity between t
 `SetVolunteerAvailabilityCommand` from v1.0 is replaced by the INACTIVE toggle inside `UpdateVolunteerProfileCommand` plus the two unavailability commands.
 
 **Queries:**
-`GetAdminDashboardQuery`, `SearchHelpRequestsQuery` (role-scoped filters: category, city, urgency, status), `GetHelpRequestDetailsQuery`, `GetVolunteerTasksQuery`, `GetMyRequestsQuery`, `GetMyProfilesQuery` [NEW] (requester + volunteer profiles and unavailability), `GetVolunteerDirectoryQuery` (admin), `GetAssignmentCandidatesQuery`.
+`GetAdminDashboardQuery`, `SearchHelpRequestsQuery` (role-scoped filters: category, city, urgency, status), `GetHelpRequestDetailsQuery`, `GetVolunteerTasksQuery`, `GetMyRequestsQuery` (owner's tickets; same filters, default status group is the open statuses), `GetMyProfilesQuery` [NEW] (requester + volunteer profiles and unavailability), `GetVolunteerDirectoryQuery` (admin), `GetAssignmentCandidatesQuery`.
 
-**Events (new or changed in v1.1):** `UserRegistered` (no role), `UserDetailsUpdated`, `VolunteerProfileEnabled`, `VolunteerProfileUpdated`, `VolunteerProfileDisabled`, `VolunteerUnavailabilityAdded`, `VolunteerUnavailabilityCancelled`, `RequesterProfileUpdated`, `HelpRequestUpdated`, `ConcurrencyClassified`. Payload definitions go in [event-sourcing.md](event-sourcing.md).
+**Events (new or changed in v1.1):** `UserRegistered` (no role), `UserDetailsUpdated`, `VolunteerProfileEnabled`, `VolunteerProfileUpdated`, `VolunteerProfileDisabled`, `VolunteerUnavailabilityAdded`, `VolunteerUnavailabilityCancelled`, `RequesterProfileUpdated`, `ConcurrencyClassified`. Payload definitions go in [event-sourcing.md](event-sourcing.md). `HelpRequestUpdated` is not emitted.
 
 ---
 
 ## 6. User workflows (course 4.1-4.5)
 
-1. **Data entry:** register with name, email, phone, password, residence city, and home address only. From the account page the person saves a requester profile before the help-request area, and a volunteer profile before the volunteer area. A requester then creates a ticket; a volunteer maintains résumé fields and unavailability periods. Names, cities, addresses, skills, and experience may be entered in Hebrew or English and are stored as written. On SQL Server those columns are bound as NVARCHAR so Hebrew is kept.
+1. **Data entry:** register with name, email, phone, password, residence city, and home address only. From the account page the person saves a requester profile before the help-request area, and a volunteer profile before the volunteer area. A requester then creates a ticket. A ticket is not edited; the owner cancels it and submits a new one. A volunteer maintains résumé fields and unavailability periods. Names, cities, addresses, skills, and experience may be entered in Hebrew or English and are stored as written. On SQL Server those columns are bound as NVARCHAR so Hebrew is kept.
 2. **Search:** filters on category, city, urgency, status (requester: own rows; admin: all; volunteer: assigned tasks).
 3. **Table:** queues, candidates per ticket, history.
 4. **Detail:** narrative, scoped location, AI score breakdown for each of the K candidates, concurrency type, exclusion summary when `NO_MATCH`.

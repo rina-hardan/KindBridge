@@ -478,6 +478,8 @@ def _restore_match_state(request: HelpRequest, history) -> None:
             request.completed_attempts.add(attempt)
             request.match_attempt = attempt + 1
             request.status = "MATCH_PROPOSED" if event.event_type == "MatchesProposed" else "NO_MATCH"
+        elif event.event_type == "HelpRequestCancelled":
+            request.status = "CANCELLED"
 
 
 def _unit(value: float) -> float:

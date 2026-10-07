@@ -6,10 +6,10 @@ from datetime import date, datetime, time, timezone
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Connection, insert, update
+from sqlalchemy import Connection, case, insert, select, update
 
 from app.domain.events import DomainEvent
-from app.repositories.tables import help_requests, task_assignments
+from app.repositories.tables import help_requests, task_assignments, volunteer_profiles
 
 
 def _naive_utc(value: datetime) -> datetime:
@@ -25,6 +25,7 @@ class MatchProjector:
             "ConcurrencyClassified": self._on_classified,
             "MatchesProposed": self._on_proposed,
             "NoMatchFound": self._on_no_match,
+            "HelpRequestCancelled": self._on_cancelled,
         }
 
     def __call__(self, events: Sequence[DomainEvent], connection: Any) -> None:
@@ -109,6 +110,51 @@ class MatchProjector:
             .where(help_requests.c.id == event.aggregate_id)
             .values(status="NO_MATCH", match_attempt=attempt + 1)
         )
+
+    def _on_cancelled(self, conn: Connection, event: DomainEvent) -> None:
+        request_id = event.aggregate_id
+        concurrency = conn.execute(
+            select(help_requests.c.concurrency_type).where(help_requests.c.id == request_id)
+        ).scalar()
+        conn.execute(update(help_requests).where(help_requests.c.id == request_id).values(status="CANCELLED"))
+        stamp = _naive_utc(event.created_at)
+        reason = str(event.payload.get("reason") or "")[:500] or None
+        conn.execute(
+            update(task_assignments)
+            .where(task_assignments.c.request_id == request_id, task_assignments.c.status == "PROPOSED")
+            .values(status="SUPERSEDED", updated_at=stamp)
+        )
+        assigned_ids = list(
+            conn.execute(
+                select(task_assignments.c.volunteer_id).where(
+                    task_assignments.c.request_id == request_id,
+                    task_assignments.c.status == "ASSIGNED",
+                )
+            ).scalars()
+        )
+        if not assigned_ids:
+            return
+        conn.execute(
+            update(task_assignments)
+            .where(task_assignments.c.request_id == request_id, task_assignments.c.status == "ASSIGNED")
+            .values(status="DECLINED", decline_reason=reason, updated_at=stamp)
+        )
+        for volunteer_id in assigned_ids:
+            _free_capacity(conn, volunteer_id, concurrency)
+
+
+def _free_capacity(conn: Connection, volunteer_id: Any, concurrency: Any) -> None:
+    if concurrency == "PARALLEL_OK":
+        column = volunteer_profiles.c.current_parallel_tasks
+        values = {
+            "current_parallel_tasks": case((column > 0, column - 1), else_=0),
+        }
+    else:
+        column = volunteer_profiles.c.current_active_tasks
+        values = {
+            "current_active_tasks": case((column > 0, column - 1), else_=0),
+        }
+    conn.execute(update(volunteer_profiles).where(volunteer_profiles.c.id == volunteer_id).values(**values))
 
 
 def _uuid(value: Any) -> UUID:

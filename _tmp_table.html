@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.rtl.min.css">
+  <link rel="stylesheet" href="/static/css/app.css">
+  <style>
+    body { background: #f8f9fa; }
+  </style>
+</head>
+<body>
+<main class="container py-5">
+  <div class="card border-0 shadow-sm">
+    <div class="table-responsive" id="wrap">
+      <table class="table mb-0 align-middle kb-table">
+        <thead>
+          <tr>
+            <th>מצב</th><th>קטגוריה</th><th>עיר</th><th>דחיפות</th><th>תאריך מועדף</th><th>תיאור</th><th>פעולות</th>
+          </tr>
+        </thead>
+        <tbody id="request-rows"></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+<script>
+  const rows = document.getElementById("request-rows");
+  const item = { status: "CANCELLED", category: "shopping", city: "חיפה", urgency: "HIGH", preferred_date: "2020-01-01", description: "צריך עזרה בקניות לסוף השבוע", overdue: false, can_cancel: false };
+  const copy = { overdue: "באיחור", cancel: "ביטול הבקשה", status: { CANCELLED: "בוטלה" }, category: { shopping: "קניות" }, urgency: { HIGH: "גבוהה" } };
+  function badge(className, text) {
+    const span = document.createElement("span");
+    span.className = "badge " + className;
+    span.textContent = text;
+    return span;
+  }
+  const tr = document.createElement("tr");
+  const statusCell = document.createElement("td");
+  statusCell.className = "d-flex flex-wrap gap-1";
+  statusCell.append(badge("text-bg-dark", copy.status.CANCELLED));
+  const description = document.createElement("td");
+  description.className = "kb-clip";
+  description.textContent = item.description;
+  function textCell(value) {
+    const td = document.createElement("td");
+    td.textContent = value;
+    return td;
+  }
+  tr.append(statusCell, textCell("קניות"), textCell(item.city), textCell("גבוהה"), textCell(item.preferred_date), description, document.createElement("td"));
+  rows.append(tr);
+</script>
+</body>
+</html>

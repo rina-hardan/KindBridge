@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}{{ t("requests.new") }} · KindBridge{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-12 col-lg-8">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body p-4">
+        <h1 class="h4 mb-1">{{ t("requests.new") }}</h1>
+        <p class="text-body-secondary small mb-4">{{ t("requests.lead") }}</p>
+        <div id="form-error" class="alert alert-danger d-none" role="alert"></div>
+        <form id="request-form" novalidate>
+          <h2 class="h6 mt-2">{{ t("requests.what") }}</h2>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label" for="category">{{ t("requests.category") }}</label>
+              <select id="category" name="category" class="form-select" required>
+                {% for code in categories %}
+                <option value="{{ code }}">{{ t("category." ~ code) }}</option>
+                {% endfor %}
+              </select>
+              <div class="invalid-feedback" data-field="category"></div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="urgency">{{ t("requests.urgency") }}</label>
+              <select id="urgency" name="urgency" class="form-select" required>
+                {% for code in urgencies %}
+                <option value="{{ code }}" {% if code == "NORMAL" %}selected{% endif %}>{{ t("urgency." ~ code) }}</option>
+                {% endfor %}
+              </select>
+              <div class="invalid-feedback" data-field="urgency"></div>
+            </div>
+            <div class="col-12">
+              <div id="emergency-notice" class="alert alert-warning d-none mb-0" role="status">{{ t("requests.emergency") }}</div>
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="description">{{ t("requests.description") }}</label>
+              <textarea id="description" name="description" class="form-control" rows="4" dir="auto" required></textarea>
+              <div class="invalid-feedback" data-field="description"></div>
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="required_skills">{{ t("requests.skills") }}</label>
+              <input id="required_skills" name="required_skills" class="form-control" dir="auto" aria-describedby="skills-help">
+              <div id="skills-help" class="form-text">{{ t("volunteer.skills_help") }}</div>
+              <div class="invalid-feedback" data-field="required_skills"></div>
+            </div>
+          </div>
+
+          <h2 class="h6 mt-4">{{ t("requests.how") }}</h2>
+          <div class="row g-3">
+            {% for code in resource_types %}
+            <div class="col-md-4">
+              <label class="border rounded p-3 h-100 d-block" for="resource-{{ code }}">
+                <input class="form-check-input ms-0 me-2" type="radio" name="resource_type" id="resource-{{ code }}" value="{{ code }}" {% if loop.first %}checked{% endif %} required>
+                <span class="fw-semibold">{{ t("resource." ~ code) }}</span>
+                <span class="form-text d-block mt-1">{{ t("resource." ~ code ~ "_help") }}</span>
+              </label>
+            </div>
+            {% endfor %}
+            <div class="col-12">
+              <div class="invalid-feedback" data-field="resource_type"></div>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="requires_vehicle" name="requires_vehicle">
+                <label class="form-check-label" for="requires_vehicle">{{ t("requests.vehicle") }}</label>
+              </div>
+              <div class="invalid-feedback" data-field="requires_vehicle"></div>
+            </div>
+          </div>
+
+          <h2 class="h6 mt-4">{{ t("requests.when") }}</h2>
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label" for="preferred_date">{{ t("requests.date") }}</label>
+              <input id="preferred_date" name="preferred_date" type="date" class="form-control">
+              <div class="invalid-feedback" data-field="preferred_date"></div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="preferred_time_from">{{ t("requests.time_from") }}</label>
+              <input id="preferred_time_from" name="preferred_time_from" type="time" class="form-control">
+              <div class="invalid-feedback" data-field="preferred_time_from"></div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="preferred_time_to">{{ t("requests.time_to") }}</label>
+              <input id="preferred_time_to" name="preferred_time_to" type="time" class="form-control" aria-describedby="time-help">
+              <div class="invalid-feedback" data-field="preferred_time_to"></div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="estimated_duration_min">{{ t("requests.duration") }}</label>
+              <input id="estimated_duration_min" name="estimated_duration_min" type="number" min="1" max="1440" class="form-control" aria-describedby="time-help">
+              <div id="time-help" class="form-text">{{ t("requests.time_help") }}</div>
+              <div class="invalid-feedback" data-field="estimated_duration_min"></div>
+            </div>
+          </div>
+
+          <h2 class="h6 mt-4">{{ t("requests.where") }}</h2>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label" for="city">{{ t("field.city") }}</label>
+              <input id="city" name="city" class="form-control" value="{{ defaults.city }}" dir="auto" required aria-describedby="city-help">
+              <div id="city-help" class="form-text">{{ t("field.city_help") }}</div>
+              <div class="invalid-feedback" data-field="city"></div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="address">{{ t("requester.address") }}</label>
+              <input id="address" name="address" class="form-control" value="{{ defaults.address }}" dir="auto" required aria-describedby="address-help">
+              <div id="address-help" class="form-text">{{ t("requests.address_help") }}</div>
+              <div class="invalid-feedback" data-field="address"></div>
+            </div>
+          </div>
+
+          <div class="d-flex gap-2 mt-4">
+            <button type="submit" class="btn btn-kb">{{ t("requests.submit") }}</button>
+            <a class="btn btn-outline-secondary" href="{{ url_for('account.requests_page') }}">{{ t("requests.back") }}</a>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  const urgency = document.getElementById("urgency");
+  const notice = document.getElementById("emergency-notice");
+  function showEmergency() {
+    notice.classList.toggle("d-none", urgency.value !== "EMERGENCY");
+  }
+  urgency.addEventListener("change", showEmergency);
+  showEmergency();
+
+  KB.bindForm("request-form", "/api/requests", (form) => {
+    const duration = form.estimated_duration_min.value.trim();
+    return {
+      category: form.category.value,
+      urgency: form.urgency.value,
+      description: form.description.value,
+      required_skills: form.required_skills.value.split(/[,،、]/).map((part) => part.trim()).filter(Boolean),
+      resource_type: form.resource_type.value,
+      requires_vehicle: form.requires_vehicle.checked,
+      preferred_date: form.preferred_date.value || null,
+      preferred_time_from: form.preferred_time_from.value || null,
+      preferred_time_to: form.preferred_time_to.value || null,
+      estimated_duration_min: duration === "" ? null : Number(duration),
+      city: form.city.value,
+      address: form.address.value,
+    };
+  }, () => { window.location.href = "/me/requests"; });
+</script>
+{% endblock %}
