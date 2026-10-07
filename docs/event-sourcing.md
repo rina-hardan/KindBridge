@@ -2,7 +2,7 @@
 
 ## 1. Rule
 
-The event store is the source of truth. Projection tables (`users`, `help_requests`, `volunteer_profiles`, `task_assignments`, `exemption_links`, dashboard aggregates) are rebuildable **from events alone**. Therefore every field a projection needs (including the password hash and the encrypted phone) must be present in some event payload. Command handlers:
+The event store is the source of truth. Projection tables (`users`, `requester_profiles`, `volunteer_profiles`, `volunteer_unavailability`, `help_requests`, `task_assignments`, `exemption_links`, dashboard aggregates) are rebuildable **from events alone**. Therefore every field a projection needs (including the password hash and the encrypted phone) must be present in some event payload. Command handlers:
 
 1. Load the aggregate by reading its event stream (or a snapshot + newer events).
 2. Decide; if invalid, raise a domain error (no insert).
@@ -19,7 +19,7 @@ Queries never `INSERT` into `event_store`.
 | `seq` | BIGINT | IDENTITY, UNIQUE index; global ordering for replay |
 | `event_id` | UNIQUEIDENTIFIER | PK, default NEWSEQUENTIALID() |
 | `aggregate_id` | UNIQUEIDENTIFIER | NOT NULL, indexed |
-| `aggregate_type` | NVARCHAR(50) | `User`, `HelpRequest`, `VolunteerProfile`, `ExemptionLink` |
+| `aggregate_type` | NVARCHAR(50) | `User`, `HelpRequest`, `ExemptionLink` |
 | `event_type` | NVARCHAR(80) | NOT NULL |
 | `payload_json` | NVARCHAR(MAX) | NOT NULL |
 | `version` | INT | NOT NULL; unique with `aggregate_id` |
@@ -38,24 +38,25 @@ Optimistic concurrency: insert with `version = last + 1`; unique `(aggregate_id,
 - `UserRegistered`: `email`, `full_name`, `phone_encrypted` (encrypted before it enters the payload). No `role` field. Public registration never sets `is_admin`; roles are derived from `is_admin` and an enabled volunteer profile.
 - `CredentialSet`: `password_hash` (bcrypt). Appended on the same User stream immediately after `UserRegistered`. Stored in the event store because projections must be rebuildable; redacted in any log or debug dump.
 - `AdminBootstrapped`: empty payload. Appended only by the one-time admin seed, after `UserRegistered` and `CredentialSet`. The projector sets `users.is_admin = 1`. Public registration never emits this event, and admin status is never granted or removed through the app.
-- `VolunteerProfileEnabled`: appended on the User stream when registration includes a volunteer profile. Payload: `profile_id`, `primary_city`, `has_vehicle`, `skills`, `experience`, `base_frequency`, `max_active_tasks`, `max_parallel_tasks`. The projector inserts `volunteer_profiles` with `is_enabled = 1` and `availability_status = AVAILABLE`. After the transaction commits, upsert the résumé into Chroma (`experience` + space + `skills_json`). A Chroma failure does not roll the event back.
+
+Volunteer profile, requester profile, and unavailability events are appended on this same User stream. There is no separate `VolunteerProfile` stream and no `VolunteerAvailabilityChanged` event. `INACTIVE` is a field of `VolunteerProfileUpdated`. Date ranges are the two unavailability events below.
+
+- `VolunteerProfileEnabled`: appended when registration includes a volunteer profile, and again when `EnableVolunteerProfileCommand` turns a disabled profile back on. Payload: `profile_id`, `primary_city`, `has_vehicle`, `skills`, `experience`, `base_frequency`, `max_active_tasks`, `max_parallel_tasks`. The projector inserts `volunteer_profiles` with `is_enabled = 1` and `availability_status = AVAILABLE`. If that `user_id` already has a profile, it sets `is_enabled = 1` on the existing row instead of inserting a second one. After the transaction commits, upsert the résumé into Chroma (`experience` + space + `skills_json`). A Chroma failure does not roll the event back.
+- `VolunteerProfileUpdated`: `UpdateVolunteerProfileCommand`, including the `INACTIVE` toggle. Payload: `profile_id`, `primary_city`, `has_vehicle`, `skills`, `experience`, `base_frequency`, `availability_status` (`AVAILABLE` or `INACTIVE`), `max_active_tasks`, `max_parallel_tasks`. No `unavailable_until`. The projector updates those columns and does not change `is_enabled` or the task counters. After commit: if `availability_status` is `INACTIVE`, delete the Chroma vector; otherwise upsert the résumé. The command rejects with 409 while the volunteer holds an `ASSIGNED` task and the new status is `INACTIVE`.
+- `VolunteerProfileDisabled`: `DisableVolunteerProfileCommand`. Payload: `profile_id`. The projector sets `is_enabled = 0` and keeps the row. After commit, delete the Chroma vector. The command rejects with 409 while the volunteer holds an `ASSIGNED` task.
+- `VolunteerUnavailabilityAdded`: `AddVolunteerUnavailabilityCommand`. Payload: `unavailability_id`, `volunteer_id` (`volunteer_profiles.id`), `from_date`, `until_date` (`until_date >= from_date`), `reason` (nullable). The projector inserts `volunteer_unavailability` with `is_cancelled = 0`. The command rejects with 409 when the period covers the date of an `ASSIGNED` task.
+- `VolunteerUnavailabilityCancelled`: `CancelVolunteerUnavailabilityCommand`. Payload: `unavailability_id`. The projector sets `is_cancelled = 1`. The row stays so a rebuild can replay the cancel; it is not deleted.
+- `RequesterProfileUpdated`: `UpdateRequesterProfileCommand`. Payload: `profile_id`, `default_city`, `default_address`, `accessibility_notes`, `emergency_contact_name`, `emergency_contact_phone_encrypted` (nullable). `default_address` is plaintext. `emergency_contact_phone` is Fernet-encrypted before it enters the payload. The projector upserts `requester_profiles`.
 - `UserLoggedIn`: audit.
 - `UserDeactivated`.
 
 Never put a plaintext password in any payload. Password hashes must not appear in logs.
 
-### VolunteerProfile
-
-The first enable is `VolunteerProfileEnabled` on the User stream (see above), not a separate aggregate.
-
-- `VolunteerProfileUpdated`: skills, experience, city, vehicle, frequency. **Triggers Chroma upsert** (post-commit side effect).
-- `VolunteerAvailabilityChanged`: status, unavailable_until. When the new status is `INACTIVE`, delete the volunteer vector from Chroma (post-commit side effect).
-
-`current_active_tasks` is not an event. It is computed only in the projector from `AssignmentApproved`, `AssignmentOverridden`, `TaskCompleted`, `TaskReleased`, and `HelpRequestCancelled`.
+`current_active_tasks` and `current_parallel_tasks` are not events. The projector computes them from `AssignmentApproved`, `AssignmentOverridden`, `TaskCompleted`, `TaskReleased`, and `HelpRequestCancelled`.
 
 ### HelpRequest
 
-- `HelpRequestCreated`: all request fields (city, address, category, resource_type, description, urgency, dates, required skills, requires_vehicle, requester_id).
+- `HelpRequestCreated`: all request fields (city, address, category, resource_type, description, urgency, dates, required skills, requires_vehicle, requester_id). `address` is plaintext in the payload; queries hide it until the request is `ASSIGNED`.
 - `MatchesProposed`: array of `{ volunteer_id, score, rationale, rank }`, `match_attempt`, `k`.
 - `NoMatchFound`: `match_attempt`, `reason`, `rejection_summary` (counts per hard-filter reason).
 - `MatchRetriggered`.
@@ -83,4 +84,4 @@ If a stream exceeds 200 events, write `snapshots(aggregate_id, version, state_js
 
 ## 6. What is not Event Sourcing
 
-JWT sessions, CSRF secrets, and Chroma vectors are **not** event-sourced. The vector upsert is a post-commit side effect of `VolunteerProfileEnabled` and `VolunteerProfileUpdated`; the volunteer résumé is the corpus. Request text (`HelpRequestCreated`) is embedded only at query time by the agent and is not stored in Chroma.
+JWT sessions, CSRF secrets, and Chroma vectors are **not** event-sourced. The vector upsert is a post-commit side effect of `VolunteerProfileEnabled` and of `VolunteerProfileUpdated` when `availability_status` is `AVAILABLE`. `VolunteerProfileDisabled` and `VolunteerProfileUpdated` with `availability_status = INACTIVE` delete that vector after commit. The volunteer résumé is the corpus. Request text (`HelpRequestCreated`) is embedded only at query time by the agent and is not stored in Chroma.

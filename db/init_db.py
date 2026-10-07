@@ -22,16 +22,86 @@ if not db_url:
 
 engine = make_engine(db_url)
 
-# הקובץ schema.sql נמצא באותה תיקייה (db)
+# schema.sql יוצר אובייקטים חסרים ואינו מוחק את event_store.
+# מחיקה מקומית של כל הטבלאות, כולל ה-event store, היא reset_local.sql.
 schema_path = os.path.join(base_dir, "schema.sql")
 
-print("מריץ את סקריפט ה-SQL המלא ליצירת כל הטבלאות...")
+
+def split_sql(script: str) -> list[str]:
+    """Split on semicolons outside string literals and comments."""
+    statements: list[str] = []
+    buf: list[str] = []
+    in_string = False
+    in_line_comment = False
+    in_block_comment = False
+    i = 0
+    while i < len(script):
+        ch = script[i]
+        nxt = script[i + 1] if i + 1 < len(script) else ""
+        if in_line_comment:
+            buf.append(ch)
+            if ch == "\n":
+                in_line_comment = False
+            i += 1
+            continue
+        if in_block_comment:
+            buf.append(ch)
+            if ch == "*" and nxt == "/":
+                buf.append(nxt)
+                in_block_comment = False
+                i += 2
+                continue
+            i += 1
+            continue
+        if in_string:
+            buf.append(ch)
+            if ch == "'" and nxt == "'":
+                buf.append(nxt)
+                i += 2
+                continue
+            if ch == "'":
+                in_string = False
+            i += 1
+            continue
+        if ch == "-" and nxt == "-":
+            buf.append(ch)
+            buf.append(nxt)
+            in_line_comment = True
+            i += 2
+            continue
+        if ch == "/" and nxt == "*":
+            buf.append(ch)
+            buf.append(nxt)
+            in_block_comment = True
+            i += 2
+            continue
+        if ch == "'":
+            in_string = True
+            buf.append(ch)
+            i += 1
+            continue
+        if ch == ";":
+            stmt = "".join(buf).strip()
+            if stmt:
+                statements.append(stmt)
+            buf = []
+            i += 1
+            continue
+        buf.append(ch)
+        i += 1
+    tail = "".join(buf).strip()
+    if tail:
+        statements.append(tail)
+    return statements
+
+
+print("מריץ את schema.sql (יצירה בלבד, בלי מחיקת event_store)...")
 
 try:
     with open(schema_path, "r", encoding="utf-8") as file:
         sql_script = file.read()
 
-    statements = [s.strip() for s in sql_script.split(";") if s.strip()]
+    statements = split_sql(sql_script)
 
     with engine.begin() as connection:
         for stmt in statements:

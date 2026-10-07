@@ -131,7 +131,8 @@ mcp_tools/                    # MCP Studio exported tools
   calculate_travel_context.py
   check_volunteer_capacity.py
 db/
-  schema.sql                  # event_store + projection tables
+  schema.sql                  # create event_store + projections; does not drop
+  reset_local.sql             # local wipe, including event_store
   seed.py                     # first admin + demo data
 tests/
 docs/
@@ -174,9 +175,10 @@ All mutating routes: CSRF + JWT. Prefix `/`.
 | GET | `/me/tasks` | VOLUNTEER | `GetVolunteerTasksQuery` |
 | POST | `/api/assignments/<id>/complete` | assigned volunteer | `CompleteTaskCommand` |
 | POST | `/api/assignments/<id>/release` | assigned volunteer | `ReleaseTaskCommand` |
-| POST | `/api/profile` | VOLUNTEER | `UpdateVolunteerProfileCommand` |
-| POST | `/api/profile/availability` | VOLUNTEER | `SetVolunteerAvailabilityCommand` |
+| POST | `/api/profile` | VOLUNTEER | `UpdateVolunteerProfileCommand` (includes the `INACTIVE` toggle) |
 | POST | `/api/exemptions` | ADMIN or volunteer | `CreateExemptionLinkCommand` |
+
+There is no `SetVolunteerAvailabilityCommand`. `INACTIVE` is a field of `UpdateVolunteerProfileCommand`. Date ranges use `AddVolunteerUnavailabilityCommand` and `CancelVolunteerUnavailabilityCommand` (system-spec section 5).
 
 The agent does not call HTTP; it imports the command bus in-process (or via a loopback that still goes through the handler), so the same invariants apply.
 
