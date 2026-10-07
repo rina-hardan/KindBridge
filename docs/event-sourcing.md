@@ -57,7 +57,7 @@ The first enable is `VolunteerProfileEnabled` on the User stream (see above), no
 
 - `HelpRequestCreated`: all request fields (city, address, category, resource_type, description, urgency, dates, required skills, requires_vehicle, requester_id).
 - `MatchesProposed`: array of `{ volunteer_id, score, rationale, rank }`, `match_attempt`, `k`.
-- `NoMatchFound`: `match_attempt`, `reason`.
+- `NoMatchFound`: `match_attempt`, `reason`, `rejection_summary` (counts per hard-filter reason).
 - `MatchRetriggered`.
 - `AssignmentApproved`: `assignment_id`, `volunteer_id`, `approved_by`.
 - `AssignmentsRejected`: volunteer ids, reason.

@@ -1,5 +1,6 @@
 """Flask application factory."""
 
+import time
 from dataclasses import dataclass
 from datetime import timedelta
 
@@ -7,15 +8,20 @@ from flask import Flask, g, jsonify, request
 from sqlalchemy import Engine
 
 from app.commands.bus import CommandBus
+from app.commands.match_commands import FallbackRationale, MatchCommandHandlers, TemplateRationale, _LlmSafety
 from app.commands.user_commands import Clock, UserCommandHandlers, utc_now
 from app.config import Config
 from app.controllers.auth_controller import auth_bp
 from app.controllers.errors import register_error_handlers
+from app.infrastructure.llm import chat_from_settings
 from app.infrastructure.vector_store import ChromaVolunteerVectorStore, NullResumeIndex, ResumeVectorStore
+from app.infrastructure.web_search import TavilySearch
+from app.projections.match_projector import MatchProjector
 from app.projections.projectors import UserProjector
 from app.repositories.db import make_engine
 from app.repositories.event_store import SqlEventStore
 from app.repositories.login_attempts import LoginAttemptRepository
+from app.repositories.matching import SqlMatchingReader
 from app.repositories.users import UserRepository
 from app.security.csrf import CSRF_COOKIE, CSRF_HEADER, UNSAFE_METHODS, new_csrf_token, tokens_match
 from app.security.encryption import FieldEncryptor
@@ -61,6 +67,21 @@ def build_services(
         resumes=resumes,
         clock=clock,
         resume_retry_delays=() if config.testing else (0.5, 1.0),
+    ).register_on(bus)
+    chat = None if config.testing else chat_from_settings(
+        config.llm_provider, config.llm_model, config.openai_api_key, config.ollama_base_url
+    )
+    MatchCommandHandlers(
+        engine=engine,
+        event_store=event_store,
+        reader=SqlMatchingReader(),
+        projector=MatchProjector(),
+        resumes=resumes,
+        clock=clock,
+        web=TavilySearch(config.tavily_api_key) if config.tavily_api_key and not config.testing else None,
+        safety=_LlmSafety(chat) if chat is not None else None,
+        rationale=FallbackRationale(chat) if chat is not None else TemplateRationale(),
+        sleep=(lambda _seconds: None) if config.testing else time.sleep,
     ).register_on(bus)
     return Services(
         config=config,

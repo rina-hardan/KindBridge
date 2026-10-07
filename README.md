@@ -16,7 +16,7 @@ KindBridge is a civic assistance matching platform: requesters submit help reque
 
 - Provider: `<openai | ollama>` (`LLM_PROVIDER`)
 - Model: `<model name>` (`LLM_MODEL`)
-- Embeddings: `<text-embedding-3-small | all-MiniLM-L6-v2>`
+- Embeddings: `EMBEDDING_PROVIDER=openai` uses `text-embedding-3-small`; `local` uses `all-MiniLM-L6-v2`
 
 The LLM only interprets Tavily results and writes the match rationale. Scores are computed by deterministic code (see [docs/agent-and-mcp.md](docs/agent-and-mcp.md) section 2.1).
 

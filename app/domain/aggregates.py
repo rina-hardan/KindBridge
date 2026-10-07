@@ -6,6 +6,7 @@ from typing import Any, ClassVar
 from uuid import UUID, uuid4
 
 from app.domain import events as ev
+from app.domain.errors import ConcurrencyConflict, DomainError
 from app.domain.events import DomainEvent
 
 AGGREGATE_TYPES = ("User", "HelpRequest", "VolunteerProfile", "ExemptionLink")
@@ -101,7 +102,35 @@ class User(AggregateRoot):
 
 
 class HelpRequest(AggregateRoot):
+    """Help-request stream. Propose is idempotent per ``match_attempt``."""
+
     aggregate_type = "HelpRequest"
+
+    def __init__(self, aggregate_id: UUID | None = None) -> None:
+        super().__init__(aggregate_id)
+        self.status = ""
+        self.match_attempt = 0
+        self.concurrency_type = "UNKNOWN"
+        self.completed_attempts: set[int] = set()
+
+    def already_proposed(self, match_attempt: int) -> bool:
+        return match_attempt in self.completed_attempts
+
+    def record_match(self, match_attempt: int, payloads: list[tuple[str, dict[str, Any]]]) -> None:
+        """Append classification and MatchesProposed or NoMatchFound for this attempt.
+
+        A repeated attempt is a no-op. The caller commits the uncommitted events.
+        """
+        if match_attempt in self.completed_attempts:
+            return
+        if self.status != "PENDING_REVIEW":
+            raise DomainError("Help request is not pending review")
+        if match_attempt != self.match_attempt:
+            raise ConcurrencyConflict(
+                f"match_attempt {match_attempt} does not match the stream head {self.match_attempt}"
+            )
+        for event_type, payload in payloads:
+            self.raise_event(event_type, payload)
 
 
 class VolunteerProfile(AggregateRoot):

@@ -77,6 +77,11 @@ class Config:
     testing: bool = False
     chroma_host: str = "localhost"
     chroma_port: int = 8000
+    llm_provider: str = "openai"
+    llm_model: str = ""
+    ollama_base_url: str = "http://localhost:11434"
+    openai_api_key: str = ""
+    tavily_api_key: str = ""
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -115,4 +120,10 @@ class Config:
             cookie_secure=os.getenv("COOKIE_SECURE", "true").lower() != "false",
             chroma_host=os.getenv("CHROMA_HOST", "localhost").strip() or "localhost",
             chroma_port=int(os.getenv("CHROMA_PORT", "8000")),
+            llm_provider=os.getenv("LLM_PROVIDER", "openai").strip() or "openai",
+            llm_model=os.getenv("LLM_MODEL", "").strip(),
+            ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").strip()
+            or "http://localhost:11434",
+            openai_api_key=os.getenv("OPENAI_API_KEY", "").strip(),
+            tavily_api_key=os.getenv("TAVILY_API_KEY", "").strip(),
         )

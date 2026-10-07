@@ -1,4 +1,4 @@
-"""MCP Studio tools exported by KindBridge."""
+"""Adapters the agent graph uses to call the MCP Studio tools."""
 
 from mcp_tools.calculate_travel_context import TOOL_SPEC as TRAVEL_TOOL_SPEC
 from mcp_tools.calculate_travel_context import calculate_travel_context

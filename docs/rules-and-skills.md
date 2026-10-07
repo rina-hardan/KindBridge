@@ -39,11 +39,11 @@ Always-on for this repo (`alwaysApply: true`): CQRS separation, append-only even
 
 ### Availability
 
-Skip `TEMPORARILY_UNAVAILABLE` while `now < unavailable_until`. Skip `INACTIVE` (volunteer toggle, or 90 days with no profile update and no completed task). Treat `BUSY` as `current_active_tasks >= max_active_tasks`.
+Skip `INACTIVE`. A non-cancelled `volunteer_unavailability` period that covers `preferred_date` (or today, when the request has no date) excludes the volunteer. `UNKNOWN` concurrency is exclusive: `current_active_tasks >= max_active_tasks` excludes them. `PARALLEL_OK` uses `current_parallel_tasks` and `max_parallel_tasks`.
 
 ### Capacity and presence
 
-Do not propose if over cap. Two overlapping `PHYSICAL_PRESENCE` windows are forbidden. See [agent-and-mcp.md](agent-and-mcp.md).
+Do not propose if over the concurrency cap. Two tasks may overlap only when both are `PARALLEL_OK`. See [agent-and-mcp.md](agent-and-mcp.md) and system-spec 4.4.
 
 ### Exemptions
 

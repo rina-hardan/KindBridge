@@ -1,4 +1,4 @@
-"""SQLAlchemy Core definitions of the tables the auth module touches.
+"""SQLAlchemy Core definitions of the projection tables.
 
 Production tables are created by db/schema.sql; these definitions must stay column-compatible with it.
 `event_store.seq` is omitted because SQL Server fills it through IDENTITY and the app never writes it.
@@ -8,12 +8,15 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     Column,
+    Date,
     DateTime,
     Integer,
     MetaData,
+    Numeric,
     String,
     Table,
     Text,
+    Time,
     UniqueConstraint,
     Uuid,
 )
@@ -64,6 +67,82 @@ volunteer_profiles = Table(
     Column("max_parallel_tasks", Integer, nullable=False, default=2),
     Column("current_active_tasks", Integer, nullable=False, default=0),
     Column("current_parallel_tasks", Integer, nullable=False, default=0),
+)
+
+requester_profiles = Table(
+    "requester_profiles",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("user_id", Uuid, nullable=False, unique=True),
+    Column("default_city", String(100), nullable=True),
+    Column("default_address", String(255), nullable=True),
+    Column("accessibility_notes", String(500), nullable=True),
+    Column("emergency_contact_name", String(200), nullable=True),
+    Column("emergency_contact_phone", String(400), nullable=True),
+    Column("updated_at", DateTime, nullable=False),
+)
+
+volunteer_unavailability = Table(
+    "volunteer_unavailability",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("volunteer_id", Uuid, nullable=False),
+    Column("from_date", Date, nullable=False),
+    Column("until_date", Date, nullable=False),
+    Column("reason", String(200), nullable=True),
+    Column("is_cancelled", Boolean, nullable=False, default=False),
+    Column("created_at", DateTime, nullable=False),
+)
+
+help_requests = Table(
+    "help_requests",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("requester_id", Uuid, nullable=False),
+    Column("series_id", Uuid, nullable=True),
+    Column("city", String(100), nullable=False),
+    Column("address", String(255), nullable=False),
+    Column("category", String(50), nullable=False),
+    Column("resource_type", String(30), nullable=False),
+    Column("description", Text, nullable=False),
+    Column("urgency", String(20), nullable=False),
+    Column("preferred_date", Date, nullable=True),
+    Column("preferred_time_from", Time, nullable=True),
+    Column("preferred_time_to", Time, nullable=True),
+    Column("estimated_duration_min", Integer, nullable=True),
+    Column("required_skills_json", Text, nullable=False),
+    Column("requires_vehicle", Boolean, nullable=False, default=False),
+    Column("concurrency_type", String(20), nullable=False, default="UNKNOWN"),
+    Column("status", String(30), nullable=False),
+    Column("match_attempt", Integer, nullable=False, default=0),
+    Column("created_at", DateTime, nullable=False),
+)
+
+task_assignments = Table(
+    "task_assignments",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("request_id", Uuid, nullable=False),
+    Column("volunteer_id", Uuid, nullable=False),
+    Column("ai_score", Numeric(5, 2), nullable=True),
+    Column("ai_rationale", String(500), nullable=True),
+    Column("rank_in_batch", Integer, nullable=True),
+    Column("match_attempt", Integer, nullable=False),
+    Column("approved_by", Uuid, nullable=True),
+    Column("status", String(30), nullable=False),
+    Column("decline_reason", String(500), nullable=True),
+    Column("override_reason", String(500), nullable=True),
+    Column("updated_at", DateTime, nullable=False),
+)
+
+exemption_links = Table(
+    "exemption_links",
+    metadata,
+    Column("volunteer_id", Uuid, primary_key=True),
+    Column("requester_id", Uuid, primary_key=True),
+    Column("created_by", Uuid, nullable=False),
+    Column("reason", String(300), nullable=False),
+    Column("created_at", DateTime, nullable=False),
 )
 
 login_attempts = Table(

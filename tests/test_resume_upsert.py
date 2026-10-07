@@ -2,6 +2,7 @@
 
 import logging
 from dataclasses import replace
+from pathlib import Path
 
 from sqlalchemy import func, select
 
@@ -74,18 +75,38 @@ def test_live_services_use_the_chroma_http_client(config, engine, clock):
     assert isinstance(services.resumes, ChromaVolunteerVectorStore)
 
 
-def test_chroma_client_upserts_the_resume_collection(monkeypatch):
-    captured: dict = {}
+class _FixedEmbedder:
+    def embed_documents(self, texts):
+        return [[0.25, 0.5, 0.75] for _text in texts]
 
+
+def _install_fake_chroma(monkeypatch, captured):
     class Collection:
-        def upsert(self, *, ids, documents, metadatas) -> None:
+        def upsert(self, *, ids, documents, metadatas, embeddings) -> None:
             captured["ids"] = ids
             captured["documents"] = documents
             captured["metadatas"] = metadatas
+            captured["embeddings"] = embeddings
+
+        def delete(self, *, ids) -> None:
+            captured["deleted"] = ids
+
+        def query(self, *, query_embeddings, n_results, include) -> dict:
+            captured["n_results"] = n_results
+            captured["include"] = include
+            captured["query_embeddings"] = query_embeddings
+            return {
+                "ids": [["profile-1"]],
+                "distances": [[0.25]],
+                "documents": [["Medic"]],
+                "metadatas": [[{"user_id": "user-1", "primary_city": "Haifa", "has_vehicle": True}]],
+            }
 
     class Client:
-        def get_or_create_collection(self, name):
+        def get_or_create_collection(self, name, metadata=None, embedding_function=None):
             captured["collection"] = name
+            captured["metadata"] = metadata
+            captured["embedding_function"] = embedding_function
             return Collection()
 
     class FakeChroma:
@@ -95,7 +116,12 @@ def test_chroma_client_upserts_the_resume_collection(monkeypatch):
             return Client()
 
     monkeypatch.setitem(__import__("sys").modules, "chromadb", FakeChroma)
-    ChromaVolunteerVectorStore("chroma.internal", 8000).upsert_resume(
+
+
+def test_chroma_client_upserts_the_resume_collection(monkeypatch):
+    captured: dict = {}
+    _install_fake_chroma(monkeypatch, captured)
+    ChromaVolunteerVectorStore("chroma.internal", 8000, embedder=_FixedEmbedder()).upsert_resume(
         profile_id="profile-1",
         user_id="user-1",
         experience="Medic",
@@ -106,8 +132,71 @@ def test_chroma_client_upserts_the_resume_collection(monkeypatch):
 
     assert captured["endpoint"] == ("chroma.internal", 8000)
     assert captured["collection"] == COLLECTION_NAME
+    assert captured["metadata"]["hnsw:space"] == "cosine"
     assert captured["ids"] == ["profile-1"]
     assert captured["documents"] == ['Medic ["first aid"]']
+    assert captured["embeddings"] == [[0.25, 0.5, 0.75]]
     assert captured["metadatas"] == [
         {"user_id": "user-1", "primary_city": "Haifa", "has_vehicle": True}
     ]
+
+
+def test_profile_update_replaces_the_chroma_document(monkeypatch):
+    captured: dict = {}
+    _install_fake_chroma(monkeypatch, captured)
+    store = ChromaVolunteerVectorStore("chroma.internal", 8000, embedder=_FixedEmbedder())
+    store.upsert_resume(
+        profile_id="profile-1",
+        user_id="user-1",
+        experience="Old resume",
+        skills_json='["driving"]',
+        primary_city="Haifa",
+        has_vehicle=False,
+    )
+    store.upsert_resume(
+        profile_id="profile-1",
+        user_id="user-1",
+        experience="Weekly grocery runs",
+        skills_json='["driving", "shopping"]',
+        primary_city="Haifa",
+        has_vehicle=True,
+    )
+
+    assert captured["ids"] == ["profile-1"]
+    assert captured["documents"] == ['Weekly grocery runs ["driving", "shopping"]']
+    assert captured["metadatas"] == [
+        {"user_id": "user-1", "primary_city": "Haifa", "has_vehicle": True}
+    ]
+
+
+def test_query_uses_provider_embeddings_and_cosine_similarity(monkeypatch):
+    captured: dict = {}
+    _install_fake_chroma(monkeypatch, captured)
+    hits = ChromaVolunteerVectorStore("chroma.internal", 8000, embedder=_FixedEmbedder()).query_resumes(
+        "ride to the clinic transport driving",
+        top_n=15,
+    )
+
+    assert captured["n_results"] == 15
+    assert captured["query_embeddings"] == [[0.25, 0.5, 0.75]]
+    assert hits[0].profile_id == "profile-1"
+    assert hits[0].similarity == 0.75
+
+
+def test_delete_resume_removes_the_profile_vector(monkeypatch):
+    captured: dict = {}
+    _install_fake_chroma(monkeypatch, captured)
+    ChromaVolunteerVectorStore("chroma.internal", 8000, embedder=_FixedEmbedder()).delete_resume("profile-1")
+
+    assert captured["deleted"] == ["profile-1"]
+
+
+def test_vector_store_does_not_open_a_local_chroma_directory():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "app" / "infrastructure" / "vector_store.py").read_text(
+        encoding="utf-8"
+    )
+    assert "PersistentClient" not in source
+    assert "chroma_db" not in source
+    assert "HttpClient" in source

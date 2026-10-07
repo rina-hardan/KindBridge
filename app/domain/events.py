@@ -9,8 +9,13 @@ from typing import Any
 from uuid import UUID, uuid4
 
 USER_AGGREGATE = "User"
+HELP_REQUEST_AGGREGATE = "HelpRequest"
 
 USER_REGISTERED = "UserRegistered"
+HELP_REQUEST_CREATED = "HelpRequestCreated"
+CONCURRENCY_CLASSIFIED = "ConcurrencyClassified"
+MATCHES_PROPOSED = "MatchesProposed"
+NO_MATCH_FOUND = "NoMatchFound"
 CREDENTIAL_SET = "CredentialSet"
 ADMIN_BOOTSTRAPPED = "AdminBootstrapped"
 VOLUNTEER_PROFILE_ENABLED = "VolunteerProfileEnabled"
