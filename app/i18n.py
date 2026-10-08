@@ -194,6 +194,20 @@ _CATALOG = {
         "tasks.hidden_note": "Address and phone are shown only for tasks that are currently assigned to you.",
         "js.generic_error": "Something went wrong. Please try again.",
         "js.network_error": "Network error. Check your connection and try again.",
+        "nav.volunteers": "Volunteer offers",
+        "offers.title": "Volunteer offers",
+        "offers.lead": "Enabled volunteer profiles, and whether each one is already assigned to a help request.",
+        "offers.empty": "There are no volunteer offers to show.",
+        "offers.assignment": "Assignment",
+        "offers.all": "All",
+        "offers.assigned": "Assigned",
+        "offers.unassigned": "Not assigned",
+        "offers.capacity": "Active tasks",
+        "offers.request": "Help request",
+        "offers.vehicle_yes": "Yes",
+        "offers.vehicle_no": "No",
+        "offers.availability.AVAILABLE": "Available",
+        "offers.availability.INACTIVE": "Inactive",
     },
     "he": {
         "nav.profile": "פרופיל",
@@ -384,6 +398,20 @@ _CATALOG = {
         "tasks.hidden_note": "כתובת וטלפון מוצגים רק במשימות שמשובצות לך כרגע.",
         "js.generic_error": "משהו השתבש. נסו שוב.",
         "js.network_error": "תקלת רשת. בדקו את החיבור ונסו שוב.",
+        "nav.volunteers": "הצעות התנדבות",
+        "offers.title": "הצעות התנדבות",
+        "offers.lead": "פרופילי מתנדב פעילים, ואם כל אחד מהם כבר שויך לבקשת עזרה.",
+        "offers.empty": "אין הצעות התנדבות להצגה.",
+        "offers.assignment": "שיוך",
+        "offers.all": "הכל",
+        "offers.assigned": "משויך",
+        "offers.unassigned": "לא משויך",
+        "offers.capacity": "משימות פעילות",
+        "offers.request": "בקשת עזרה",
+        "offers.vehicle_yes": "כן",
+        "offers.vehicle_no": "לא",
+        "offers.availability.AVAILABLE": "פנוי",
+        "offers.availability.INACTIVE": "לא פעיל",
     },
 }
 
@@ -462,6 +490,12 @@ def current_lang() -> str:
 
 def translate(key: str) -> str:
     lang = current_lang()
+    catalog = _CATALOG.get(lang) or _CATALOG["he"]
+    return catalog.get(key) or _CATALOG["en"].get(key) or key
+
+
+def translate_to(lang: str, key: str) -> str:
+    """Catalog text in a fixed language. For code that runs without a request (e-mail, agent)."""
     catalog = _CATALOG.get(lang) or _CATALOG["he"]
     return catalog.get(key) or _CATALOG["en"].get(key) or key
 

@@ -223,7 +223,7 @@ SQL Server is remote (Somee). Secrets only in environment: `DATABASE_URL`, `JWT_
 | No eligible volunteers | `NoMatchFound` -> `NO_MATCH` |
 | Embedding API down | Retry 3x exponential backoff; leave ticket `PENDING_REVIEW`; log `embedding_failed` |
 | Chroma server down | Profile save still commits the event; vector upsert is retried; agent leaves ticket `PENDING_REVIEW` and logs `vector_store_unavailable` |
-| Gmail MCP down | Assignment still commits; enqueue `NotificationPending` projection for retry |
+| Gmail MCP down | Assignment still commits. The notifier retries 3 times (10 s timeout each, backoff), then logs `notify_failed` and returns. There is no durable retry queue in v1 |
 | Agent crash mid-batch | Idempotency key `(request_id, match_attempt)`; duplicate Propose is a no-op |
 
 ---

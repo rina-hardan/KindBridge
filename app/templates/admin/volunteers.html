@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}{{ t("offers.title") }} · KindBridge{% endblock %}
+{% block content %}
+<header class="mb-4">
+  <h1 class="h4 mb-1">{{ t("offers.title") }}</h1>
+  <p class="text-body-secondary mb-0">{{ t("offers.lead") }}</p>
+</header>
+
+<form class="card border-0 shadow-sm mb-4" method="get" action="{{ url_for('admin.volunteers_page') }}">
+  <div class="card-body">
+    <div class="row g-3 align-items-end">
+      <div class="col-sm-6 col-md-4">
+        <label class="form-label" for="filter-assignment">{{ t("offers.assignment") }}</label>
+        <select class="form-select" id="filter-assignment" name="assignment">
+          {% for value in offers.assignment_choices %}
+          <option value="{{ value }}" {% if value == offers.assignment %}selected{% endif %}>{{ t("offers." + value) }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-sm-6 col-md-3">
+        <button class="btn btn-kb w-100" type="submit">{{ t("requests.filter") }}</button>
+      </div>
+    </div>
+  </div>
+</form>
+
+{% if offers.rows %}
+<div class="card border-0 shadow-sm">
+  <div class="table-responsive kb-table-wrap">
+    <table class="table table-hover align-middle mb-0 kb-table">
+      <caption class="visually-hidden">{{ t("offers.title") }}</caption>
+      <thead>
+        <tr>
+          <th scope="col">{{ t("dashboard.volunteer") }}</th>
+          <th scope="col">{{ t("field.city") }}</th>
+          <th scope="col">{{ t("volunteer.skills") }}</th>
+          <th scope="col">{{ t("volunteer.experience") }}</th>
+          <th scope="col">{{ t("volunteer.vehicle") }}</th>
+          <th scope="col">{{ t("dashboard.status") }}</th>
+          <th scope="col">{{ t("offers.capacity") }}</th>
+          <th scope="col">{{ t("offers.assignment") }}</th>
+          <th scope="col">{{ t("offers.request") }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in offers.rows %}
+        <tr data-volunteer="{{ item.full_name }}" data-assignment="{{ 'assigned' if item.assigned else 'unassigned' }}">
+          <td dir="auto">{{ item.full_name }}</td>
+          <td dir="auto">{{ item.city }}</td>
+          <td dir="auto">{{ item.skills | join(", ") }}</td>
+          <td dir="auto">{{ item.experience }}</td>
+          <td>{{ t("offers.vehicle_yes") if item.has_vehicle else t("offers.vehicle_no") }}</td>
+          <td>{{ t("offers.availability." + item.availability_status) }}</td>
+          <td>{{ item.current_active_tasks }} / {{ item.max_active_tasks }}</td>
+          <td>
+            {% if item.assigned %}
+            <span class="badge kb-status kb-status-assigned">{{ t("offers.assigned") }}</span>
+            {% else %}
+            <span class="badge kb-status kb-status-no_match">{{ t("offers.unassigned") }}</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if item.assignments %}
+            <ul class="list-unstyled mb-0">
+              {% for link in item.assignments %}
+              <li>
+                <a href="{{ url_for('requests.detail_page', request_id=link.request_id) }}">{{ link.request_id }}</a>
+                <span dir="auto">{{ link.category }}</span>
+                <span dir="auto">{{ link.city }}</span>
+              </li>
+              {% endfor %}
+            </ul>
+            {% else %}
+            <span class="text-body-secondary">—</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% if offers.page_count > 1 %}
+<nav class="mt-3" aria-label="{{ t('dashboard.pages') }}">
+  <ul class="pagination mb-0">
+    <li class="page-item {% if not offers.has_previous %}disabled{% endif %}">
+      {% if offers.has_previous %}
+      <a class="page-link" href="{{ url_for('admin.volunteers_page', page=offers.page - 1, assignment=offers.assignment) }}">{{ t("dashboard.prev") }}</a>
+      {% else %}
+      <span class="page-link">{{ t("dashboard.prev") }}</span>
+      {% endif %}
+    </li>
+    <li class="page-item disabled"><span class="page-link">{{ offers.page }} / {{ offers.page_count }}</span></li>
+    <li class="page-item {% if not offers.has_next %}disabled{% endif %}">
+      {% if offers.has_next %}
+      <a class="page-link" href="{{ url_for('admin.volunteers_page', page=offers.page + 1, assignment=offers.assignment) }}">{{ t("dashboard.next") }}</a>
+      {% else %}
+      <span class="page-link">{{ t("dashboard.next") }}</span>
+      {% endif %}
+    </li>
+  </ul>
+</nav>
+{% endif %}
+{% else %}
+<p class="mb-0">{{ t("offers.empty") }}</p>
+{% endif %}
+{% endblock %}

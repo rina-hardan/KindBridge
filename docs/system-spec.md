@@ -48,7 +48,7 @@ KindBridge coordinates citizen assistance requests, volunteer capacity, and AI-a
 | :--- | :--- | :--- | :--- |
 | Requester | Every public registration | Create/cancel/edit (before assignment) own requests; search/filter/detail **own** tickets; maintain own requester profile | See volunteer phone/address until `ASSIGNED`; see other requesters' tickets |
 | Volunteer | Enable volunteer profile from the account page | Edit own profile; add/cancel unavailability periods; see **assigned** tasks; complete or release | See other volunteers; see full address until assigned; be assigned to own request |
-| Admin / dispatcher | Seed only; exclusive | Dashboard, search all, approve/reject/override, retrigger match, reclassify concurrency, manage exemptions | Impersonate login; submit requests; volunteer |
+| Admin / dispatcher | Seed only; exclusive | Dashboard, search all, read volunteer offers (assigned or not), approve/reject/override, retrigger match, reclassify concurrency, manage exemptions | Impersonate login; submit requests; volunteer |
 
 ---
 
@@ -378,6 +378,8 @@ Only volunteers who passed 4.2 are ranked. Inputs: semantic similarity between t
 
 **Queries:**
 `GetAdminDashboardQuery`, `SearchHelpRequestsQuery` (role-scoped filters: category, city, urgency, status), `GetHelpRequestDetailsQuery`, `GetVolunteerTasksQuery`, `GetMyRequestsQuery` (owner's tickets; same filters, default status group is the open statuses), `GetMyProfilesQuery` [NEW] (requester + volunteer profiles and unavailability), `GetVolunteerDirectoryQuery` (admin), `GetAssignmentCandidatesQuery`.
+
+`GetVolunteerOffersQuery` (admin) reads enabled volunteer profiles of active users on `GET /admin/volunteers`. A profile is assigned when it has a `task_assignments` row in `ASSIGNED` (the screen links that request and shows its category and city) and unassigned otherwise; `page` and `assignment` (`all`, `assigned`, `unassigned`) only filter the read. Phone and address are not shown.
 
 **Events (new or changed in v1.1):** `UserRegistered` (no role), `UserDetailsUpdated`, `VolunteerProfileEnabled`, `VolunteerProfileUpdated`, `VolunteerProfileDisabled`, `VolunteerUnavailabilityAdded`, `VolunteerUnavailabilityCancelled`, `RequesterProfileUpdated`, `ConcurrencyClassified`. Payload definitions go in [event-sourcing.md](event-sourcing.md). `HelpRequestUpdated` is not emitted.
 

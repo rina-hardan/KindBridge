@@ -1,7 +1,7 @@
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import Connection, select, true
+from sqlalchemy import Connection, func, select, true
 
 from app.repositories.tables import requester_profiles, users, volunteer_profiles
 
@@ -26,6 +26,15 @@ class AccountRecord:
     home_address: str | None
     is_admin: bool
     is_active: bool
+
+
+@dataclass(frozen=True)
+class Contact:
+    """Where a notification may go. Always read from the users projection, never from a request."""
+
+    user_id: uuid.UUID
+    email: str
+    full_name: str
 
 
 class UserRepository:
@@ -103,6 +112,52 @@ class UserRepository:
         stmt = select(volunteer_profiles.c.id).where(volunteer_profiles.c.user_id == user_id)
         row = conn.execute(stmt).first()
         return None if row is None else row.id
+
+    def contact(self, conn: Connection, user_id: uuid.UUID) -> Contact | None:
+        row = conn.execute(
+            select(users.c.id, users.c.email, users.c.full_name).where(
+                users.c.id == user_id, users.c.is_active == true()
+            )
+        ).first()
+        return None if row is None else Contact(row.id, row.email, row.full_name)
+
+    def volunteer_contact(self, conn: Connection, profile_id: uuid.UUID) -> Contact | None:
+        """``profile_id`` is ``volunteer_profiles.id``; the address comes from the owning user."""
+        row = conn.execute(
+            select(users.c.id, users.c.email, users.c.full_name)
+            .select_from(volunteer_profiles.join(users, users.c.id == volunteer_profiles.c.user_id))
+            .where(volunteer_profiles.c.id == profile_id, users.c.is_active == true())
+        ).first()
+        return None if row is None else Contact(row.id, row.email, row.full_name)
+
+    def volunteer_names(self, conn: Connection, profile_ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
+        if not profile_ids:
+            return {}
+        rows = conn.execute(
+            select(volunteer_profiles.c.id, users.c.full_name)
+            .select_from(volunteer_profiles.join(users, users.c.id == volunteer_profiles.c.user_id))
+            .where(volunteer_profiles.c.id.in_(profile_ids))
+        )
+        return {row.id: row.full_name for row in rows}
+
+    def active_admin_contacts(self, conn: Connection) -> list[Contact]:
+        rows = conn.execute(
+            select(users.c.id, users.c.email, users.c.full_name)
+            .where(users.c.is_admin == true(), users.c.is_active == true())
+            .order_by(users.c.email)
+        )
+        return [Contact(row.id, row.email, row.full_name) for row in rows]
+
+    def admin_contact_by_email(self, conn: Connection, email: str) -> Contact | None:
+        """ADMIN_NOTIFY_EMAIL only counts when it belongs to an active admin in the database."""
+        row = conn.execute(
+            select(users.c.id, users.c.email, users.c.full_name).where(
+                func.lower(users.c.email) == email.strip().lower(),
+                users.c.is_admin == true(),
+                users.c.is_active == true(),
+            )
+        ).first()
+        return None if row is None else Contact(row.id, row.email, row.full_name)
 
     def admin_exists(self, conn: Connection) -> bool:
         stmt = select(users.c.id).where(users.c.is_admin == true()).limit(1)

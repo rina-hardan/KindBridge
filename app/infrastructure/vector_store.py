@@ -77,7 +77,7 @@ class NullResumeIndex:
 class _StoredVectors:
     """Stops Chroma from embedding with its own model. Vectors are passed in."""
 
-    def __call__(self, documents):
+    def __call__(self, input):
         raise RuntimeError("embeddings are computed by EMBEDDING_PROVIDER before Chroma is called")
 
     def embed_query(self, documents):

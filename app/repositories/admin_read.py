@@ -1,5 +1,6 @@
 """Read models for the admin dashboard. Queries never write."""
 
+import json
 import math
 import uuid
 from dataclasses import dataclass
@@ -163,3 +164,130 @@ def _date(value: object) -> date | None:
     if isinstance(value, date):
         return value
     return date.fromisoformat(str(value)[:10])
+
+
+@dataclass(frozen=True)
+class VolunteerOfferAssignment:
+    request_id: uuid.UUID
+    category: str
+    city: str
+
+
+@dataclass(frozen=True)
+class VolunteerOfferRow:
+    full_name: str
+    city: str
+    skills: tuple[str, ...]
+    experience: str
+    has_vehicle: bool
+    availability_status: str
+    current_active_tasks: int
+    max_active_tasks: int
+    assignments: tuple[VolunteerOfferAssignment, ...]
+
+
+class VolunteerOfferReadRepository:
+    """Enabled volunteer profiles for active users, plus any ASSIGNED requests. Read only."""
+
+    def __init__(self, engine: Engine) -> None:
+        self._engine = engine
+
+    def list_offers(self) -> tuple[VolunteerOfferRow, ...]:
+        assigned = (
+            select(
+                task_assignments.c.volunteer_id,
+                task_assignments.c.request_id,
+                help_requests.c.category,
+                help_requests.c.city,
+            )
+            .select_from(
+                task_assignments.outerjoin(
+                    help_requests, help_requests.c.id == task_assignments.c.request_id
+                )
+            )
+            .where(task_assignments.c.status == "ASSIGNED")
+            .subquery()
+        )
+        with self._engine.connect() as conn:
+            rows = conn.execute(
+                select(
+                    volunteer_profiles.c.id,
+                    users.c.full_name,
+                    volunteer_profiles.c.primary_city,
+                    volunteer_profiles.c.skills_json,
+                    volunteer_profiles.c.experience,
+                    volunteer_profiles.c.has_vehicle,
+                    volunteer_profiles.c.availability_status,
+                    volunteer_profiles.c.current_active_tasks,
+                    volunteer_profiles.c.max_active_tasks,
+                    assigned.c.request_id,
+                    assigned.c.category,
+                    assigned.c.city.label("request_city"),
+                )
+                .select_from(volunteer_profiles)
+                .join(users, users.c.id == volunteer_profiles.c.user_id)
+                .outerjoin(assigned, assigned.c.volunteer_id == volunteer_profiles.c.id)
+                .where(volunteer_profiles.c.is_enabled == True)  # noqa: E712
+                .where(users.c.is_active == True)  # noqa: E712
+                .order_by(users.c.full_name, volunteer_profiles.c.id, assigned.c.request_id)
+            )
+            return _group_offers(rows)
+
+
+def _group_offers(rows) -> tuple[VolunteerOfferRow, ...]:
+    order: list[uuid.UUID] = []
+    grouped: dict[uuid.UUID, dict] = {}
+    for row in rows:
+        profile_id = _uuid(row.id)
+        found = grouped.get(profile_id)
+        if found is None:
+            found = {
+                "full_name": row.full_name,
+                "city": row.primary_city,
+                "skills": _skills(row.skills_json),
+                "experience": row.experience,
+                "has_vehicle": bool(row.has_vehicle),
+                "availability_status": row.availability_status,
+                "current_active_tasks": int(row.current_active_tasks),
+                "max_active_tasks": int(row.max_active_tasks),
+                "assignments": [],
+            }
+            grouped[profile_id] = found
+            order.append(profile_id)
+        if row.request_id is None:
+            continue
+        found["assignments"].append(
+            VolunteerOfferAssignment(
+                request_id=_uuid(row.request_id),
+                category=row.category or "",
+                city=row.request_city or "",
+            )
+        )
+    return tuple(
+        VolunteerOfferRow(
+            full_name=grouped[profile_id]["full_name"],
+            city=grouped[profile_id]["city"],
+            skills=grouped[profile_id]["skills"],
+            experience=grouped[profile_id]["experience"],
+            has_vehicle=grouped[profile_id]["has_vehicle"],
+            availability_status=grouped[profile_id]["availability_status"],
+            current_active_tasks=grouped[profile_id]["current_active_tasks"],
+            max_active_tasks=grouped[profile_id]["max_active_tasks"],
+            assignments=tuple(grouped[profile_id]["assignments"]),
+        )
+        for profile_id in order
+    )
+
+
+def _skills(raw: object) -> tuple[str, ...]:
+    if isinstance(raw, list):
+        return tuple(str(item) for item in raw)
+    if not raw:
+        return ()
+    try:
+        parsed = json.loads(str(raw))
+    except (TypeError, json.JSONDecodeError):
+        return ()
+    if not isinstance(parsed, list):
+        return ()
+    return tuple(str(item) for item in parsed)

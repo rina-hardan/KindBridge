@@ -1,7 +1,8 @@
 from flask import Blueprint, current_app, redirect, render_template, request, url_for
 
 from app.queries.admin_queries import GetAdminDashboardQuery
-from app.repositories.admin_read import AdminReadRepository
+from app.queries.admin_volunteer_queries import GetVolunteerOffersQuery
+from app.repositories.admin_read import AdminReadRepository, VolunteerOfferReadRepository
 from app.security.auth import current_identity
 
 admin_bp = Blueprint("admin", __name__)
@@ -25,3 +26,18 @@ def dashboard_page():
     services = current_app.extensions["kindbridge"]
     dashboard = GetAdminDashboardQuery(AdminReadRepository(services.engine)).execute(page=_page_arg())
     return render_template("admin/dashboard.html", dashboard=dashboard)
+
+
+@admin_bp.get("/admin/volunteers")
+def volunteers_page():
+    identity = current_identity()
+    if identity is None:
+        return redirect(url_for("auth.login_page"))
+    if not identity.has_any("ADMIN"):
+        return render_template("admin/forbidden.html"), 403
+    services = current_app.extensions["kindbridge"]
+    offers = GetVolunteerOffersQuery(VolunteerOfferReadRepository(services.engine)).execute(
+        page=_page_arg(),
+        assignment=request.args.get("assignment", "all"),
+    )
+    return render_template("admin/volunteers.html", offers=offers)

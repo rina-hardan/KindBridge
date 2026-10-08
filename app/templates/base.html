@@ -19,6 +19,7 @@
         {% block nav %}{% endblock %}
         {% if identity and identity.has_any("ADMIN") %}
         <a class="btn btn-link btn-sm text-body-secondary" href="{{ url_for('admin.dashboard_page') }}">{{ t("nav.dashboard") }}</a>
+        <a class="btn btn-link btn-sm text-body-secondary" href="{{ url_for('admin.volunteers_page') }}">{{ t("nav.volunteers") }}</a>
         <a class="btn btn-link btn-sm text-body-secondary" href="{{ url_for('requests.search_page') }}">{{ t("nav.requests") }}</a>
         {% endif %}
         <button id="lang-switch" class="btn btn-link btn-sm text-body-secondary" type="button">{{ t("nav.language") }}</button>

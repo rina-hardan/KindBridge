@@ -2,6 +2,7 @@
 
 import logging
 from dataclasses import replace
+from inspect import signature
 from pathlib import Path
 
 from sqlalchemy import func, select
@@ -135,6 +136,7 @@ def test_chroma_client_upserts_the_resume_collection(monkeypatch):
         has_vehicle=True,
     )
 
+    assert list(signature(type(captured["embedding_function"]).__call__).parameters) == ["self", "input"]
     assert captured["endpoint"] == ("chroma.internal", 8000)
     assert captured["collection"] == COLLECTION_NAME
     assert captured["metadata"]["hnsw:space"] == "cosine"

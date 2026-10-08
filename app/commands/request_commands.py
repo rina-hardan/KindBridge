@@ -13,6 +13,7 @@ from app.commands.user_commands import Clock, utc_now
 from app.domain.aggregates import HelpRequest
 from app.domain.errors import ConcurrencyConflict, DomainError, Forbidden, NotFound, ValidationError
 from app.domain.matching import capacity_or_overlap, is_self_assignment, rejection_reason
+from app.infrastructure.notification_service import NoNotifications, Notifications
 from app.projections.match_projector import MatchProjector
 from app.repositories.event_store import SqlEventStore
 from app.repositories.matching import SqlMatchingReader
@@ -96,6 +97,7 @@ class RequestCommandHandlers:
         projector: MatchProjector,
         users: UserRepository,
         clock: Clock = utc_now,
+        notifications: Notifications | None = None,
     ) -> None:
         self._engine = engine
         self._event_store = event_store
@@ -103,6 +105,7 @@ class RequestCommandHandlers:
         self._projector = projector
         self._users = users
         self._clock = clock
+        self._notifications = notifications or NoNotifications()
 
     def register_on(self, bus: CommandBus) -> None:
         bus.register(SubmitHelpRequestCommand, self.submit)
@@ -156,7 +159,7 @@ class RequestCommandHandlers:
         self._assert_can_approve(request, profile_id)
         request.approve(command.assignment_id, command.approved_by)
         self._commit(request)
-        logger.info("gmail_notify_skipped request=%s volunteer=%s", request.aggregate_id, profile_id)
+        self._notifications.assignment_made(request.aggregate_id, profile_id)
 
     def reject(self, command: RejectAssignmentCommand) -> None:
         request = self._load(command.request_id)
@@ -168,7 +171,7 @@ class RequestCommandHandlers:
         self._assert_can_override(request, command.volunteer_id)
         request.override(uuid4(), command.volunteer_id, command.reason, command.approved_by)
         self._commit(request)
-        logger.info("gmail_notify_skipped request=%s volunteer=%s", request.aggregate_id, command.volunteer_id)
+        self._notifications.assignment_made(request.aggregate_id, command.volunteer_id)
 
     def retrigger(self, command: RetriggerMatchCommand) -> None:
         request = self._load(command.request_id)
@@ -179,11 +182,12 @@ class RequestCommandHandlers:
         request = self._load(command.request_id)
         if not command.is_admin and request.requester_id != command.actor_id:
             raise Forbidden("Your role cannot perform this action")
-        notify = request.status == "ASSIGNED"
+        # cancel() clears assigned_volunteer_id, so read it first. Only an ASSIGNED request has someone to tell.
+        volunteer_to_notify = request.assigned_volunteer_id if request.status == "ASSIGNED" else None
         request.cancel(command.actor_id, command.reason, self._clock())
         self._commit(request)
-        if notify:
-            logger.info("gmail_notify_skipped request=%s", request.aggregate_id)
+        if volunteer_to_notify is not None:
+            self._notifications.cancelled_while_assigned(request.aggregate_id, volunteer_to_notify)
 
     def _load(self, request_id: UUID) -> HelpRequest:
         history = self._event_store.load_stream(request_id)

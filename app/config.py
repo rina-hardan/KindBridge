@@ -2,7 +2,7 @@
 
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from cryptography.fernet import Fernet
@@ -10,6 +10,9 @@ from dotenv import load_dotenv
 
 MIN_BCRYPT_ROUNDS = 12
 MIN_JWT_SECRET_LENGTH = 32
+DEFAULT_GMAIL_TOKEN_DIR = ".secrets/gmail"
+DEFAULT_APP_BASE_URL = "http://localhost:5000"
+_TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 
 
 class ConfigError(RuntimeError):
@@ -26,6 +29,13 @@ def _get(environ: Mapping[str, str], name: str, default: str = "") -> str:
 def _int_setting(environ: Mapping[str, str], name: str, default: int) -> int:
     raw = _get(environ, name, str(default))
     return int(raw)
+
+
+def _flag(environ: Mapping[str, str], name: str, default: bool = False) -> bool:
+    raw = _get(environ, name, "")
+    if not raw:
+        return default
+    return raw.strip().lower() in _TRUE_VALUES
 
 
 def load_settings(environ: Mapping[str, str] | None = None) -> dict[str, Any]:
@@ -59,6 +69,10 @@ def load_settings(environ: Mapping[str, str] | None = None) -> dict[str, Any]:
         "TAVILY_API_KEY": _get(environ, "TAVILY_API_KEY"),
         "GMAIL_MCP_CLIENT_ID": _get(environ, "GMAIL_MCP_CLIENT_ID"),
         "GMAIL_MCP_CLIENT_SECRET": _get(environ, "GMAIL_MCP_CLIENT_SECRET"),
+        "ADMIN_NOTIFY_EMAIL": _get(environ, "ADMIN_NOTIFY_EMAIL"),
+        "MAIL_ENABLED": _flag(environ, "MAIL_ENABLED"),
+        "GMAIL_TOKEN_DIR": _get(environ, "GMAIL_TOKEN_DIR", DEFAULT_GMAIL_TOKEN_DIR),
+        "APP_BASE_URL": _get(environ, "APP_BASE_URL", DEFAULT_APP_BASE_URL),
     }
 
 
@@ -82,6 +96,13 @@ class Config:
     ollama_base_url: str = "http://localhost:11434"
     openai_api_key: str = ""
     tavily_api_key: str = ""
+    # Gmail notifications. The client id and secret stay out of repr() so a logged Config never leaks them.
+    mail_enabled: bool = False
+    gmail_client_id: str = field(default="", repr=False)
+    gmail_client_secret: str = field(default="", repr=False)
+    admin_notify_email: str = ""
+    gmail_token_dir: str = DEFAULT_GMAIL_TOKEN_DIR
+    app_base_url: str = DEFAULT_APP_BASE_URL
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -126,4 +147,10 @@ class Config:
             or "http://localhost:11434",
             openai_api_key=os.getenv("OPENAI_API_KEY", "").strip(),
             tavily_api_key=os.getenv("TAVILY_API_KEY", "").strip(),
+            mail_enabled=os.getenv("MAIL_ENABLED", "").strip().lower() in _TRUE_VALUES,
+            gmail_client_id=os.getenv("GMAIL_MCP_CLIENT_ID", "").strip(),
+            gmail_client_secret=os.getenv("GMAIL_MCP_CLIENT_SECRET", "").strip(),
+            admin_notify_email=os.getenv("ADMIN_NOTIFY_EMAIL", "").strip(),
+            gmail_token_dir=os.getenv("GMAIL_TOKEN_DIR", "").strip() or DEFAULT_GMAIL_TOKEN_DIR,
+            app_base_url=(os.getenv("APP_BASE_URL", "").strip() or DEFAULT_APP_BASE_URL).rstrip("/"),
         )

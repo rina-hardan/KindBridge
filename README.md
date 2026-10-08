@@ -56,6 +56,15 @@ pip install -r requirements.txt
 
 Copy `.env.example` to `.env` (`copy` on Windows CMD, `cp` on macOS/Linux) and fill in the values.
 
+**Gmail notifications (optional)**
+
+Mail is off by default (`MAIL_ENABLED=false`). To turn it on you need **Node.js 18+** (`node -v`), because the Gmail MCP server (`@artymclabin/gmail-mcp`) is started with `npx`. Details: [docs/agent-and-mcp.md](docs/agent-and-mcp.md) section 6.1.
+
+1. In Google Cloud: enable the Gmail API, configure the OAuth consent screen, add your Gmail address as a **Test user**, and create an OAuth client of type **Desktop app**. Put its id and secret in `GMAIL_MCP_CLIENT_ID` and `GMAIL_MCP_CLIENT_SECRET` in `.env`.
+2. Authorize once (opens a browser; port 3000 must be free): `python -m scripts.gmail_auth`. The token is stored in `.secrets/gmail/` (git-ignored). While the consent screen is in *Testing* mode the token expires after 7 days; run the command again then.
+3. Smoke test: `python -m scripts.send_test_email --to <email of a registered KindBridge user>`.
+4. Set `MAIL_ENABLED=true` in `.env` and restart Flask and the agent.
+
 Create the schema by running `db/schema.sql` on the SQL Server database, then create the first admin (uses `ADMIN_BOOTSTRAP_EMAIL`):
 
 ```bash

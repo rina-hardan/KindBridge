@@ -20,6 +20,14 @@ from app.controllers.requests_controller import requests_bp
 from app.controllers.errors import register_error_handlers
 from app.i18n import current_lang, localize, translate
 from app.infrastructure.llm import chat_from_settings
+from app.infrastructure.notification_service import (
+    NoNotifications,
+    Notifications,
+    NotificationService,
+    background_runner,
+    inline_runner,
+)
+from app.infrastructure.notifier import GmailMcpNotifier, Notifier, NullNotifier, build_notifier
 from app.infrastructure.vector_store import ChromaVolunteerVectorStore, NullResumeIndex, ResumeVectorStore
 from app.infrastructure.web_search import TavilySearch
 from app.projections.exemption_projector import ExemptionProjector
@@ -45,6 +53,23 @@ class Services:
     tokens: TokenService
     resumes: ResumeVectorStore
     encryptor: FieldEncryptor
+    notifier: Notifier
+
+
+def _build_notifications(config: Config, engine: Engine, notifier: Notifier) -> Notifications:
+    if isinstance(notifier, NullNotifier):
+        return NoNotifications()
+    # Real Gmail sends can take seconds, so they run on a worker thread. Tests use an inline runner.
+    run = background_runner() if isinstance(notifier, GmailMcpNotifier) else inline_runner
+    return NotificationService(
+        engine,
+        notifier,
+        UserRepository(),
+        SqlMatchingReader(),
+        admin_notify_email=config.admin_notify_email,
+        base_url=config.app_base_url,
+        run=run,
+    )
 
 
 def build_services(
@@ -52,6 +77,7 @@ def build_services(
     engine: Engine | None = None,
     clock: Clock = utc_now,
     resumes: ResumeVectorStore | None = None,
+    notifier: Notifier | None = None,
 ) -> Services:
     engine = engine or make_engine(config.database_url)
     event_store = SqlEventStore(config.database_url, engine=engine)
@@ -63,6 +89,8 @@ def build_services(
         )
     bus = CommandBus(event_store)
     encryptor = FieldEncryptor(config.encryption_key)
+    notifier = notifier if notifier is not None else build_notifier(config)
+    notifications = _build_notifications(config, engine, notifier)
     UserCommandHandlers(
         engine=engine,
         event_store=event_store,
@@ -91,6 +119,7 @@ def build_services(
         safety=_LlmSafety(chat) if chat is not None else None,
         rationale=FallbackRationale(chat) if chat is not None else TemplateRationale(),
         sleep=(lambda _seconds: None) if config.testing else time.sleep,
+        notifications=notifications,
     ).register_on(bus)
     RequestCommandHandlers(
         engine=engine,
@@ -99,6 +128,7 @@ def build_services(
         projector=MatchProjector(),
         users=UserRepository(),
         clock=clock,
+        notifications=notifications,
     ).register_on(bus)
     ExemptionCommandHandlers(engine=engine, event_store=event_store, projector=ExemptionProjector()).register_on(bus)
     return Services(
@@ -109,6 +139,7 @@ def build_services(
         tokens=TokenService(config.jwt_secret, config.jwt_ttl_minutes),
         resumes=resumes,
         encryptor=encryptor,
+        notifier=notifier,
     )
 
 
@@ -117,13 +148,14 @@ def create_app(
     engine: Engine | None = None,
     clock: Clock = utc_now,
     resumes: ResumeVectorStore | None = None,
+    notifier: Notifier | None = None,
 ) -> Flask:
     """Build the KindBridge web app. Flask CLI calls this with no arguments."""
     config = config or Config.from_env()
     app = Flask(__name__)
     app.config["TESTING"] = config.testing
     app.json.ensure_ascii = False
-    app.extensions["kindbridge"] = build_services(config, engine, clock, resumes)
+    app.extensions["kindbridge"] = build_services(config, engine, clock, resumes, notifier)
 
     register_error_handlers(app)
     _install_csrf(app, config)

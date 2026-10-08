@@ -1,7 +1,14 @@
 """Embedding providers. Chroma never chooses the model; EMBEDDING_PROVIDER does."""
 
+import logging
 import os
 from typing import Protocol
+
+logger = logging.getLogger(__name__)
+
+LOCAL_MODEL = "all-MiniLM-L6-v2"
+OPENAI_MODEL = "text-embedding-3-small"
+_PLACEHOLDER_KEYS = {"", "your_openai_api_key_here"}
 
 
 class Embedder(Protocol):
@@ -36,8 +43,18 @@ class LocalEmbedder:
 
 
 def embedder_from_env() -> Embedder:
-    provider = os.getenv("EMBEDDING_PROVIDER", "openai").strip().lower()
-    if provider == "local":
-        return LocalEmbedder(os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2").strip() or "all-MiniLM-L6-v2")
-    model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small").strip() or "text-embedding-3-small"
-    return OpenAIEmbedder(os.getenv("OPENAI_API_KEY", ""), model)
+    """OpenAI when a real key is configured; otherwise the local MiniLM fallback."""
+    provider = os.getenv("EMBEDDING_PROVIDER", "openai").strip().lower() or "openai"
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    configured_model = os.getenv("EMBEDDING_MODEL", "").strip()
+    if provider == "local" or api_key in _PLACEHOLDER_KEYS:
+        if provider != "local":
+            logger.warning("embedding_provider=local reason=openai_api_key_unconfigured")
+        model = LOCAL_MODEL
+        if provider == "local" and configured_model and configured_model != OPENAI_MODEL:
+            model = configured_model
+        logger.info("embedding_provider=local model=%s", model)
+        return LocalEmbedder(model)
+    model = configured_model or OPENAI_MODEL
+    logger.info("embedding_provider=openai model=%s", model)
+    return OpenAIEmbedder(api_key, model)

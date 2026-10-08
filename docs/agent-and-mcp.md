@@ -76,7 +76,7 @@ Chroma returns cosine **distance**. Convert with `clip(1 - distance, 0, 1)` and 
 
 Collection `volunteer_resumes`: id = `volunteer_profile.id`, document = `experience + " " + skills_json`, metadata = `{user_id, primary_city, has_vehicle}`.
 
-On `VolunteerProfileEnabled` and `VolunteerProfileUpdated`: upsert. On deactivate: delete the vector (`delete_resume`). Access only through `app/infrastructure/vector_store.py`, which embeds with `EMBEDDING_PROVIDER` (`openai` → `text-embedding-3-small`, `local` → `all-MiniLM-L6-v2`) and talks to the Chroma **HTTP** server. Do not open `./chroma_db` or any other local Chroma directory from the agent or from Flask.
+On `VolunteerProfileEnabled` and `VolunteerProfileUpdated`: upsert. On deactivate: delete the vector (`delete_resume`). Access only through `app/infrastructure/vector_store.py`, which embeds with `EMBEDDING_PROVIDER` (`openai` → `text-embedding-3-small`, `local` → `all-MiniLM-L6-v2`) and talks to the Chroma **HTTP** server. If `EMBEDDING_PROVIDER=openai` but `OPENAI_API_KEY` is empty or still the `.env.example` placeholder, use the local model instead of calling OpenAI. A configured key whose API then fails is not this fallback: retry 3 times and leave the request `PENDING_REVIEW`. Do not open `./chroma_db` or any other local Chroma directory from the agent or from Flask.
 
 ## 5. MCP Studio tools (NFR 10)
 
@@ -127,4 +127,40 @@ Overlap follows system-spec 4.4: allowed only when both the request and the assi
 ## 6. External MCP (NFR 9)
 
 - **Tavily:** search query `"{request_city} transit disruption OR municipal emergency {today_iso}"`. Used only as context in rationale, not as a hard filter unless the LLM flags `unsafe_travel` (then feasibility *= 0.5).
-- **Gmail:** send on `AssignmentApproved`, `AssignmentOverridden`, `HelpRequestCancelled` (if volunteer was assigned), `TaskReleased` (notify admin). These events are produced by HTTP commands, so notifications are sent by the command side (Flask process), not by the agent. Failures are retried; they do not roll back events.
+- **Gmail:** see 6.1. Mail is a post-commit side effect: it is sent after the events are committed, and a failed send never rolls back or blocks an event.
+
+### 6.1 Gmail notifier design
+
+Code lives behind one small interface, so commands never see MCP:
+
+```python
+class Notifier(Protocol):
+    def send(self, to: str, subject: str, body: str) -> None: ...
+```
+
+| Class | Used when |
+| :--- | :--- |
+| `GmailMcpNotifier` | `MAIL_ENABLED=true`, not testing, and `GMAIL_MCP_CLIENT_ID` / `GMAIL_MCP_CLIENT_SECRET` are set |
+| `NullNotifier` | Everything else (tests, mail off, Gmail not configured) |
+| `FakeNotifier` | Tests; records the sent messages |
+
+**MCP server.** `GmailMcpNotifier` is an MCP client (official `mcp` Python SDK, stdio transport). For each mail it launches `npx -y @artymclabin/gmail-mcp@1.2.3` and calls the `send_email` tool with `{ to: [address], subject, body, mimeType: "text/plain" }`. This is the maintained fork of the unmaintained `GongRzhe/Gmail-MCP-Server`; it accepts a Desktop-type OAuth client, encodes Hebrew subjects (RFC 2047) and bodies (UTF-8), and can be limited to the `gmail.send` scope. The version is pinned on purpose. Node.js 18+ must be on `PATH`.
+
+**Credentials.** The server reads a keys file and writes its token file; both live in `GMAIL_TOKEN_DIR` (default `.secrets/gmail`, git-ignored): `gcp-oauth.keys.json` is generated at runtime from the environment variables, and `credentials.json` is written by `python -m scripts.gmail_auth` (one-time browser consent, scope `gmail.send` only). The client id and secret are never passed on a command line, never logged, and not part of `repr(Config)`. In Google's *Testing* mode a refresh token expires after 7 days; the notifier then logs `notify_failed` with a hint to re-run the auth script.
+
+**Behaviour.** Each send has a 10 s timeout and 3 attempts (backoff 0.5 s, then 1 s). A permanent problem (no stored token, expired token, malformed address, no Node) is not retried. After the last attempt the notifier logs `notify_failed` (masked address, scrubbed reason) and returns; it never raises into a command. In Flask and in the agent the service runs sends on one background worker thread, so an HTTP response or the agent poll is never held by Gmail. There is no durable retry queue in v1: a crash between commit and send loses that one mail.
+
+**Recipients.** Only addresses that come from the `users` projection: the assigned volunteer (`volunteer_profiles.user_id`), the requester (`help_requests.requester_id`), and admins (`users.is_admin` and `is_active`). `ADMIN_NOTIFY_EMAIL` narrows the admin list to one address, and only if that address belongs to an active admin; otherwise every active admin is mailed.
+
+**Copy.** Message text is built by a pure module (`app/infrastructure/notifications.py`), Hebrew by default and English on request, using the `app/i18n.py` category and urgency labels. Mails never contain a phone number or an address; the volunteer sees them on the tasks page after logging in.
+
+| Event | Process | Recipients |
+| :--- | :--- | :--- |
+| `AssignmentApproved` | Flask | assigned volunteer and requester |
+| `AssignmentOverridden` | Flask | assigned volunteer and requester |
+| `HelpRequestCancelled`, only when the status was `ASSIGNED` | Flask | the assigned volunteer |
+| `TaskReleased` | Flask | requester and admin(s). The notifier method `task_released` exists; no `ReleaseTaskCommand` calls it yet |
+| `MatchesProposed` | **agent** | admin(s): "New match proposal waiting for review" with request id, category, city, urgency, the top candidates (name and `ai_score`), and a link to `/requests/<id>` |
+| `NoMatchFound` | **agent** | admin(s): the same facts plus the `rejection_summary` |
+
+**Idempotency of the admin mail.** `ProposeMatchCommand` is idempotent per `(request_id, match_attempt)`. The mail is sent only by the run that actually appended `MatchesProposed` or `NoMatchFound`; a repeated poll of the same attempt is a no-op and sends nothing. A proposal that fails to commit (for example a concurrency conflict) sends nothing.

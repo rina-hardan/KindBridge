@@ -37,6 +37,7 @@ from app.domain.matching import (
     skill_overlap,
 )
 from app.infrastructure.llm import unsafe_travel
+from app.infrastructure.notification_service import NoNotifications, Notifications
 from app.infrastructure.vector_store import EmbeddingFailed, ResumeHit, ResumeVectorStore, VectorStoreUnavailable
 from app.projections.match_projector import MatchProjector
 from app.repositories.event_store import SqlEventStore
@@ -100,6 +101,7 @@ class MatchWork:
     outcome: str = ""
     proposed: int = 0
     query_text: str = ""
+    appended: list[tuple[str, dict]] = field(default_factory=list)
 
 
 class WebSearch(Protocol):
@@ -169,6 +171,7 @@ class MatchCommandHandlers:
         rationale: RationaleWriter | None = None,
         sleep: Callable[[float], None] | None = None,
         retrieval_attempts: int = _RETRIEVAL_ATTEMPTS,
+        notifications: Notifications | None = None,
     ) -> None:
         self._engine = engine
         self._event_store = event_store
@@ -181,6 +184,7 @@ class MatchCommandHandlers:
         self._rationale = rationale or TemplateRationale()
         self._sleep = sleep or (lambda _seconds: None)
         self._retrieval_attempts = retrieval_attempts
+        self._notifications = notifications or NoNotifications()
         self._compiled = None
 
     def register_on(self, bus: CommandBus) -> None:
@@ -191,12 +195,20 @@ class MatchCommandHandlers:
         from agent.graph import invoke_match_graph
 
         finished = invoke_match_graph(self, work)
+        self._notify_admins(finished)
         return ProposeMatchResult(
             request_id=command.request_id,
             match_attempt=command.match_attempt,
             outcome=finished.outcome,
             proposed=finished.proposed,
         )
+
+    def _notify_admins(self, work: MatchWork) -> None:
+        """Post-commit. ``work.appended`` is filled only by the run that actually wrote the event,
+        so a re-poll of the same match_attempt (a no-op) never mails the admins twice."""
+        for event_type, payload in work.appended:
+            if event_type in (MATCHES_PROPOSED, NO_MATCH_FOUND):
+                self._notifications.match_outcome(work.command.request_id, event_type, payload)
 
     def load(self, work: MatchWork) -> None:
         if work.stop:
@@ -458,6 +470,7 @@ class MatchCommandHandlers:
             projector=self._projector,
         )
         request.mark_committed()
+        work.appended = list(payloads)
 
     def _today(self):
         return self._clock().date()

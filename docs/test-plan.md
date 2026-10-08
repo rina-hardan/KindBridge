@@ -39,6 +39,21 @@ Stack: pytest + Flask test client + SQL Server test DB or LocalDB. Agent tests m
 - Cancel from PENDING: no Gmail to volunteer.
 - Cancel from ASSIGNED: capacity freed; volunteer notified (Gmail mocked).
 
+## Notifications (`tests/test_notifications.py`, no network)
+
+Tests use `FakeNotifier`; nothing talks to Gmail.
+
+- Approve and override send two mails: the assigned volunteer and the requester. The mails hold no phone number or address.
+- Cancel from `ASSIGNED` mails the volunteer only. Cancel from `PENDING_REVIEW`, or with an unapproved proposal, sends nothing. A rejected approve sends nothing.
+- `MatchesProposed` mails every active admin (not inactive ones) with the request facts and the candidates in rank order; `NoMatchFound` adds the rejection summary. `ADMIN_NOTIFY_EMAIL` narrows the list only to an admin that exists in the database.
+- A second `ProposeMatchCommand` for the same `(request_id, match_attempt)` is a no-op and sends no second mail. A proposal that fails to commit sends none.
+- A notifier that raises, and a failure while resolving recipients, never raise into the command and never roll back events (approve, cancel, propose).
+- Recipients come only from the database: an unknown volunteer profile or request produces no mail.
+- `GmailMcpNotifier`: 3 attempts with backoff then `notify_failed` with no secret and a masked address; a permanent error is not retried; malformed addresses are never sent; nothing is launched without a stored token; works inside a running event loop.
+- The real MCP client path (stdio, `send_email`, Hebrew text, server error text, expired token) runs against `tests/fake_gmail_mcp_server.py`, a local stand-in.
+- `build_notifier` returns `NullNotifier` unless mail is enabled and configured; `Config.__repr__` hides the Gmail client id and secret.
+- Manual, outside pytest: `python -m scripts.send_test_email --to <user email>` and the end-to-end check in the README.
+
 ## Event sourcing
 
 - Replay rebuilds identical `help_requests.status` and assignment counts.
