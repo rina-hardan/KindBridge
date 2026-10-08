@@ -1,6 +1,12 @@
 {% extends "base.html" %}
 {% block title %}{{ t("request.title") }} · KindBridge{% endblock %}
 {% block content %}
+<p class="mb-3 d-flex flex-wrap align-items-center gap-2">
+  <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('account.profile_page') }}">{{ t("requester.back") }}</a>
+  {% if not is_admin %}
+  <a href="{{ url_for('account.requests_page') }}">{{ t("requests.back") }}</a>
+  {% endif %}
+</p>
 <div id="request-flash" class="alert alert-success d-none" role="status"></div>
 <div id="request-error" class="alert alert-danger d-none" role="alert"></div>
 
@@ -71,7 +77,7 @@
           </div>
         </article>
         {% endfor %}
-      {% elif details.status != "NO_MATCH" %}
+      {% elif is_admin and details.status != "NO_MATCH" %}
       <p class="text-body-secondary mb-0">{{ t("request.no_cards") }}</p>
       {% endif %}
 

@@ -145,7 +145,7 @@ def test_volunteer_entry_saves_profile_then_opens_tasks(client, engine):
     assert profile.primary_city == "Haifa"
     assert json.loads(profile.skills_json) == ["first aid", "driving"]
     assert client.get("/me/volunteer").headers["Location"].endswith("/me/tasks")
-    assert "המשימות יופיעו כאן".encode() in client.get("/me/tasks").data
+    assert "עדיין אין לך התנדבויות".encode() in client.get("/me/tasks").data
     assert "ההתנדבות שלי".encode() in client.get("/me").data
 
 

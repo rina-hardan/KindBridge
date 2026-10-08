@@ -1,3 +1,5 @@
+from datetime import date
+
 from flask import Blueprint, current_app, jsonify, redirect, render_template, request, url_for
 
 from app.commands.dtos import (
@@ -9,7 +11,9 @@ from app.domain.requests import ALL_STATUSES, CATEGORIES, RESOURCE_TYPES, URGENC
 from app.i18n import localize
 from app.queries.account_queries import AccountView, GetMyAccountQuery
 from app.queries.request_queries import GetRequesterDefaultsQuery
+from app.queries.volunteer_queries import GetVolunteerTasksQuery
 from app.repositories.users import UserRepository
+from app.repositories.volunteer_tasks import VolunteerTaskRepository
 from app.security.auth import current_identity, require_auth, set_access_cookie
 
 account_bp = Blueprint("account", __name__)
@@ -22,6 +26,18 @@ def _services():
 def _account_query() -> GetMyAccountQuery:
     services = _services()
     return GetMyAccountQuery(services.engine, UserRepository(), services.encryptor)
+
+
+def _tasks_query() -> GetVolunteerTasksQuery:
+    services = _services()
+    return GetVolunteerTasksQuery(VolunteerTaskRepository(services.engine), services.encryptor)
+
+
+def _page_arg() -> int:
+    try:
+        return int(request.args.get("page", "1"))
+    except (TypeError, ValueError):
+        return 1
 
 
 def _account_or_login():
@@ -179,4 +195,44 @@ def tasks_page():
         return admin
     if not account.has_volunteer_profile:
         return redirect(url_for("account.volunteer_join_page"))
-    return render_template("account/tasks_home.html")
+    found = _tasks_query().execute(
+        account.user_id,
+        status=request.args.get("status", ""),
+        page=_page_arg(),
+        today=date.today(),
+    )
+    return render_template("account/tasks_home.html", tasks=found)
+
+
+@account_bp.get("/api/me/tasks")
+@require_auth("VOLUNTEER")
+def my_tasks():
+    identity = current_identity()
+    found = _tasks_query().execute(
+        identity.user_id,
+        status=request.args.get("status", ""),
+        page=_page_arg(),
+        today=date.today(),
+    )
+    return jsonify(
+        items=[
+            {
+                "assignment_id": item.assignment_id,
+                "request_id": item.request_id,
+                "status": item.status,
+                "category": item.category,
+                "city": item.city,
+                "urgency": item.urgency,
+                "preferred_date": item.preferred_date,
+                "description": item.description,
+                "requester_name": item.requester_name,
+                "overdue": item.overdue,
+                "address": item.address,
+                "phone": item.phone,
+            }
+            for item in found.items
+        ],
+        page=found.page,
+        page_size=found.page_size,
+        total=found.total,
+    )

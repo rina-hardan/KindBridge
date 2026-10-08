@@ -29,6 +29,8 @@ class MatchProjector:
             "AssignmentApproved": self._on_approved,
             "AssignmentsRejected": self._on_rejected,
             "AssignmentOverridden": self._on_overridden,
+            "TaskCompleted": self._on_completed,
+            "TaskReleased": self._on_released,
             "HelpRequestCancelled": self._on_cancelled,
         }
 
@@ -176,6 +178,30 @@ class MatchProjector:
             update(help_requests).where(help_requests.c.id == event.aggregate_id).values(status="ASSIGNED")
         )
         _shift_capacity(conn, volunteer_id, _concurrency(conn, event.aggregate_id), 1)
+
+    def _on_completed(self, conn: Connection, event: DomainEvent) -> None:
+        self._close_assignment(conn, event, status="COMPLETED", request_status="COMPLETED")
+
+    def _on_released(self, conn: Connection, event: DomainEvent) -> None:
+        self._close_assignment(conn, event, status="DECLINED", request_status="PENDING_REVIEW")
+
+    def _close_assignment(self, conn: Connection, event: DomainEvent, *, status: str, request_status: str) -> None:
+        assignment_id = _uuid(event.payload["assignment_id"])
+        volunteer_id = conn.execute(
+            select(task_assignments.c.volunteer_id)
+            .where(task_assignments.c.id == assignment_id)
+            .where(task_assignments.c.status == "ASSIGNED")
+        ).scalar()
+        if volunteer_id is None:
+            return
+        values: dict[str, Any] = {"status": status, "updated_at": _naive_utc(event.created_at)}
+        if status == "DECLINED":
+            values["decline_reason"] = str(event.payload.get("reason") or "")[:500]
+        conn.execute(update(task_assignments).where(task_assignments.c.id == assignment_id).values(**values))
+        conn.execute(
+            update(help_requests).where(help_requests.c.id == event.aggregate_id).values(status=request_status)
+        )
+        _shift_capacity(conn, _uuid(volunteer_id), _concurrency(conn, event.aggregate_id), -1)
 
     def _on_cancelled(self, conn: Connection, event: DomainEvent) -> None:
         stamp = _naive_utc(event.created_at)

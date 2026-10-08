@@ -13,9 +13,9 @@
 </head>
 <body class="bg-body-tertiary">
   <nav class="navbar border-bottom bg-white">
-    <div class="container">
+    <div class="container flex-wrap gap-2">
       <a class="navbar-brand fw-semibold kb-brand" href="{{ url_for('account.profile_page') if identity else url_for('auth.login_page') }}">KindBridge</a>
-      <div class="d-flex align-items-center gap-2">
+      <div class="d-flex flex-wrap align-items-center gap-2">
         {% block nav %}{% endblock %}
         {% if identity and identity.has_any("ADMIN") %}
         <a class="btn btn-link btn-sm text-body-secondary" href="{{ url_for('admin.dashboard_page') }}">{{ t("nav.dashboard") }}</a>
@@ -23,6 +23,7 @@
         {% endif %}
         <button id="lang-switch" class="btn btn-link btn-sm text-body-secondary" type="button">{{ t("nav.language") }}</button>
         {% if identity %}
+        <a class="btn btn-outline-primary btn-sm" href="{{ url_for('account.profile_page') }}">{{ t("nav.profile") }}</a>
         <button id="logout" class="btn btn-outline-secondary btn-sm" type="button">{{ t("nav.logout") }}</button>
         {% endif %}
       </div>

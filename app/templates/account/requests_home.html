@@ -6,7 +6,10 @@
     <h1 class="h4 mb-1">{{ t("requests.title") }}</h1>
     <p class="text-body-secondary small mb-0">{{ t("requests.lead") }}</p>
   </div>
-  <a class="btn btn-kb" href="{{ url_for('account.new_request_page') }}">{{ t("requests.new") }}</a>
+  <div class="d-flex flex-wrap gap-2">
+    <a class="btn btn-outline-secondary" href="{{ url_for('account.profile_page') }}">{{ t("requester.back") }}</a>
+    <a class="btn btn-kb" href="{{ url_for('account.new_request_page') }}">{{ t("requests.new") }}</a>
+  </div>
 </div>
 
 <div class="card border-0 shadow-sm mb-4">
@@ -160,15 +163,7 @@
   }
 
   function statusBadge(status) {
-    const tone = {
-      PENDING_REVIEW: "text-bg-warning",
-      MATCH_PROPOSED: "text-bg-info",
-      NO_MATCH: "text-bg-secondary",
-      ASSIGNED: "text-bg-primary",
-      COMPLETED: "text-bg-success",
-      CANCELLED: "text-bg-dark"
-    };
-    return badge(tone[status] || "text-bg-secondary", copy.status[status] || status);
+    return badge("kb-status kb-status-" + String(status).toLowerCase(), copy.status[status] || status);
   }
 
   function render(data) {
@@ -187,11 +182,14 @@
       const statusCell = document.createElement("td");
       statusCell.className = "d-flex flex-wrap gap-1";
       statusCell.append(statusBadge(item.status));
-      if (item.overdue) statusCell.append(badge("text-bg-danger", copy.overdue));
+      if (item.overdue) statusCell.append(badge("kb-status kb-status-overdue", copy.overdue));
       const description = document.createElement("td");
       description.className = "kb-clip";
-      description.textContent = item.description;
-      description.title = item.description;
+      const link = document.createElement("a");
+      link.href = "/requests/" + item.id;
+      link.textContent = item.description;
+      link.title = item.description;
+      description.append(link);
       const action = document.createElement("td");
       if (item.can_cancel) {
         const button = document.createElement("button");
@@ -201,6 +199,16 @@
         button.addEventListener("click", () => openCancel(item));
         action.append(button);
       }
+      tr.className = "kb-row-link";
+      tr.tabIndex = 0;
+      tr.dataset.href = "/requests/" + item.id;
+      tr.addEventListener("click", (event) => {
+        if (event.target.closest("a, button, input, select, textarea")) return;
+        window.location.href = tr.dataset.href;
+      });
+      tr.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") window.location.href = tr.dataset.href;
+      });
       tr.append(
         statusCell,
         textCell(copy.category[item.category] || item.category),

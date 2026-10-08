@@ -602,6 +602,7 @@ def test_submit_creates_a_pending_request_and_lists_it(client, engine):
     body = hebrew_city.get_json()
     assert body["total"] == 1
     assert body["items"][0]["id"] == request_id
+    assert body["items"][0]["status"] == "PENDING_REVIEW"
     assert body["items"][0]["overdue"] is True
     assert body["items"][0]["can_cancel"] is True
     assert errands.get_json()["total"] == 1
@@ -618,6 +619,30 @@ def test_invalid_window_does_not_create_a_request(client, engine):
     assert "preferred_time_to" in response.get_json()["fields"]
     with engine.connect() as conn:
         assert conn.execute(select(help_requests)).first() is None
+
+
+def test_a_requester_sees_only_their_own_requests(client, app):
+    enroll(client)
+    own_id = submit(client).get_json()["id"]
+
+    other = app.test_client()
+    other.get("/api/auth/csrf")
+    register(other, dict(REQUESTER, email="other@example.com", full_name="Noa Levi"))
+    save_requester(other, dict(REQUESTER_PROFILE, default_city="Tel Aviv"))
+    other_id = submit(other, description="Noa's own errand", city="Tel Aviv").get_json()["id"]
+
+    mine = client.get("/api/me/requests?status=all").get_json()
+    theirs = other.get("/api/me/requests?status=all").get_json()
+    detail = client.get(f"/requests/{own_id}")
+
+    assert [item["id"] for item in mine["items"]] == [own_id]
+    assert mine["items"][0]["status"] == "PENDING_REVIEW"
+    assert [item["id"] for item in theirs["items"]] == [other_id]
+    assert detail.status_code == 200
+    assert "ממתין לבדיקה".encode() in detail.data
+    assert "חזרה לבקשות".encode() in detail.data
+    assert other.get(f"/requests/{own_id}").status_code == 403
+    assert "ממתין לבדיקה".encode() in client.get("/me/requests").data
 
 
 def test_cancel_leaves_the_open_list_and_another_requester_cannot_cancel(client, app, engine):

@@ -6,6 +6,7 @@ from flask import has_request_context, request
 
 _CATALOG = {
     "en": {
+        "nav.profile": "Profile",
         "nav.logout": "Log out",
         "nav.language": "עברית",
         "nav.dashboard": "Dashboard",
@@ -186,11 +187,16 @@ _CATALOG = {
         "resource.FLEXIBLE_REMOTE": "Remote and flexible",
         "resource.FLEXIBLE_REMOTE_help": "Can be done from another city.",
         "tasks.title": "Volunteering",
-        "tasks.body": "You are registered as a volunteer. Your tasks will be listed here.",
+        "tasks.lead": "The volunteering you took on, with where each one stands.",
+        "tasks.empty": "You have no volunteering yet. Tasks appear here once a dispatcher assigns one to you.",
+        "tasks.empty_filtered": "No volunteering has this status.",
+        "tasks.hidden": "Shown only while the task is assigned",
+        "tasks.hidden_note": "Address and phone are shown only for tasks that are currently assigned to you.",
         "js.generic_error": "Something went wrong. Please try again.",
         "js.network_error": "Network error. Check your connection and try again.",
     },
     "he": {
+        "nav.profile": "פרופיל",
         "nav.logout": "יציאה",
         "nav.language": "English",
         "nav.dashboard": "לוח בקרה",
@@ -371,7 +377,11 @@ _CATALOG = {
         "resource.FLEXIBLE_REMOTE": "מרחוק וגמיש",
         "resource.FLEXIBLE_REMOTE_help": "אפשר גם מעיר אחרת.",
         "tasks.title": "התנדבות",
-        "tasks.body": "החשבון רשום כמתנדב. המשימות יופיעו כאן.",
+        "tasks.lead": "ההתנדבויות שלקחת על עצמך, וההתקדמות של כל אחת.",
+        "tasks.empty": "עדיין אין לך התנדבויות. משימה תופיע כאן אחרי שמתאם יבחר בך.",
+        "tasks.empty_filtered": "אין התנדבויות בסטטוס הזה.",
+        "tasks.hidden": "מוצג רק כל עוד המשימה משובצת",
+        "tasks.hidden_note": "כתובת וטלפון מוצגים רק במשימות שמשובצות לך כרגע.",
         "js.generic_error": "משהו השתבש. נסו שוב.",
         "js.network_error": "תקלת רשת. בדקו את החיבור ונסו שוב.",
     },

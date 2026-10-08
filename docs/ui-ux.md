@@ -39,7 +39,7 @@ Goal: professional, calm civic-ops UI (not a marketing landing page). Screen cop
 | `/me/requester` | Entry when the person has no requester profile. Saves default city, default address, accessibility notes, and emergency contact, then opens `/me/requests` |
 | `/me/volunteer` | Entry when the person has no volunteer profile. Saves city (starts as the residence city), skills, experience, vehicle, and frequency, then opens `/me/tasks` |
 | `/me/requests` | Help-request area, only after a requester profile exists. Filterable table of the person's own tickets, a link to create one, and cancel. There is no edit action |
-| `/me/tasks` | Volunteer area, only after a volunteer profile exists. The task table and complete/release actions below are the next screen and are not on this page yet |
+| `/me/tasks` | Volunteer area, only after a volunteer profile exists. Table of the volunteer's own `ASSIGNED` and `COMPLETED` tasks with a status filter and pagination (20 rows). Address and phone are shown for `ASSIGNED` tasks and masked `••••` for `COMPLETED`. The complete/release actions below are not on this page yet |
 
 ### Requester
 

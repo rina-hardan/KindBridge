@@ -192,7 +192,8 @@ There is no request-update route. Replacing a ticket means cancel, then submit a
 | POST | `/api/requests/<id>/reject` | ADMIN | `RejectAssignmentCommand` |
 | POST | `/api/requests/<id>/override` | ADMIN | `OverrideAssignmentCommand` |
 | POST | `/api/requests/<id>/retrigger` | ADMIN | `RetriggerMatchCommand` |
-| GET | `/me/tasks` | non-admin with a volunteer profile | holding page until `GetVolunteerTasksQuery`; otherwise redirect to `/me/volunteer` |
+| GET | `/me/tasks` | non-admin with a volunteer profile | `GetVolunteerTasksQuery`: the caller's own `ASSIGNED` and `COMPLETED` tasks (filter `status`, `page`); otherwise redirect to `/me/volunteer` |
+| GET | `/api/me/tasks` | VOLUNTEER | same query as JSON. Address and phone are returned only for `ASSIGNED` tasks, otherwise `null` |
 | POST | `/api/assignments/<id>/complete` | assigned volunteer | `CompleteTaskCommand` |
 | POST | `/api/assignments/<id>/release` | assigned volunteer | `ReleaseTaskCommand` |
 | POST | `/api/profile` | VOLUNTEER | `UpdateVolunteerProfileCommand` (includes the `INACTIVE` toggle) |
