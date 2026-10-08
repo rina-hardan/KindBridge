@@ -129,7 +129,10 @@ class AdminReadRepository:
                 volunteer_profiles.c.availability_status,
                 volunteer_profiles.c.current_active_tasks,
                 volunteer_profiles.c.max_active_tasks,
-                volunteer_profiles.c.id.in_(covering).label("temporarily_unavailable"),
+                case(
+                    (volunteer_profiles.c.id.in_(covering), 1),
+                    else_=0,
+                ).label("temporarily_unavailable"),
             )
             .join(users, users.c.id == volunteer_profiles.c.user_id)
             .where(volunteer_profiles.c.is_enabled == True)  # noqa: E712
