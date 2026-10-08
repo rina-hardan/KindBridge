@@ -205,7 +205,7 @@ class MatchCommandHandlers:
         if not history:
             raise NotFound("Help request was not found")
         request = HelpRequest.load(work.command.request_id, history)
-        _restore_match_state(request, history)
+        request.restore(history)
         if request.already_proposed(work.command.match_attempt):
             work.stop = True
             work.outcome = "noop"
@@ -461,23 +461,6 @@ class MatchCommandHandlers:
 
     def _today(self):
         return self._clock().date()
-
-
-def _restore_match_state(request: HelpRequest, history) -> None:
-    """Fold propose state from the stream so a repeated attempt is a no-op."""
-    for event in history:
-        if event.event_type == "HelpRequestCreated":
-            request.status = "PENDING_REVIEW"
-            request.concurrency_type = str(event.payload.get("concurrency_type") or "UNKNOWN")
-            if event.payload.get("match_attempt") is not None:
-                request.match_attempt = int(event.payload["match_attempt"])
-        elif event.event_type == "ConcurrencyClassified" and event.payload.get("concurrency_type"):
-            request.concurrency_type = str(event.payload["concurrency_type"])
-        elif event.event_type in ("MatchesProposed", "NoMatchFound"):
-            attempt = int(event.payload["match_attempt"])
-            request.completed_attempts.add(attempt)
-            request.match_attempt = attempt + 1
-            request.status = "MATCH_PROPOSED" if event.event_type == "MatchesProposed" else "NO_MATCH"
 
 
 def _unit(value: float) -> float:

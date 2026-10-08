@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}{{ t("request.title") }} · KindBridge{% endblock %}
+{% block content %}
+<div id="request-flash" class="alert alert-success d-none" role="status"></div>
+<div id="request-error" class="alert alert-danger d-none" role="alert"></div>
+
+<div id="request-detail" class="row g-4" data-request-id="{{ details.request_id }}" data-requester-id="{{ details.requester_id }}" data-assigned="{{ '1' if details.assigned else '0' }}">
+  <div class="col-lg-7">
+    <article class="card border-0 shadow-sm h-100">
+      <div class="card-body p-4">
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+          <span class="badge kb-status kb-status-{{ details.status|lower }}">{{ t("status." + details.status) }}</span>
+          {% if details.overdue %}
+          <span class="badge kb-status kb-status-overdue">{{ t("status.OVERDUE") }}</span>
+          {% endif %}
+          <span class="badge text-bg-light border">{{ t("urgency." + details.urgency) }}</span>
+        </div>
+        <h1 class="h4 mb-3" dir="auto">{{ details.requester_name }}</h1>
+        <dl class="row mb-0">
+          <dt class="col-sm-4">{{ t("field.city") }}</dt>
+          <dd class="col-sm-8" dir="auto">{{ details.city }}</dd>
+          <dt class="col-sm-4">{{ t("dashboard.category") }}</dt>
+          <dd class="col-sm-8" dir="auto">{{ details.category }}</dd>
+          <dt class="col-sm-4">{{ t("request.address") }}</dt>
+          <dd class="col-sm-8" dir="auto">{{ details.address }}</dd>
+          <dt class="col-sm-4">{{ t("field.phone") }}</dt>
+          <dd class="col-sm-8" dir="ltr">{{ details.phone }}</dd>
+        </dl>
+        <h2 class="h6 mt-4">{{ t("request.description") }}</h2>
+        <p class="mb-0" dir="auto">{{ details.description }}</p>
+        {% if details.can_cancel %}
+        <button id="cancel-open" class="btn btn-outline-danger mt-4" type="button" data-working="{{ t('action.working') }}">{{ t("action.cancel_request") }}</button>
+        {% endif %}
+      </div>
+    </article>
+  </div>
+
+  <div class="col-lg-5">
+    <div class="d-flex flex-column gap-3">
+      {% if details.status == "NO_MATCH" %}
+      <div class="alert alert-warning mb-0" role="status">{{ t("request.no_eligible") }}</div>
+      {% if details.rejection_summary %}
+      <ul class="list-group shadow-sm">
+        {% for code, count in details.rejection_summary %}
+        <li class="list-group-item d-flex justify-content-between">
+          <span>{{ t("filter." + code) }}</span>
+          <span>{{ count }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      {% endif %}
+
+      {% if details.cards %}
+        {% for card in details.cards %}
+        <article class="card border-0 shadow-sm">
+          <div class="card-body">
+            {% if details.can_approve %}
+            <div class="form-check mb-2">
+              <input class="form-check-input" type="radio" name="assignment" id="assignment-{{ card.assignment_id }}" value="{{ card.assignment_id }}">
+              <label class="form-check-label fw-semibold" for="assignment-{{ card.assignment_id }}" dir="auto">{{ card.full_name }}</label>
+            </div>
+            {% else %}
+            <h2 class="h6" dir="auto">{{ card.full_name }}</h2>
+            {% endif %}
+            <p class="mb-1" dir="auto">{{ card.city }}</p>
+            {% if details.show_scores %}
+            <p class="mb-1">{{ t("request.score") }}: {{ card.score_label if card.score_label else "—" }}</p>
+            <p class="mb-0" dir="auto">{{ card.rationale if card.rationale else "—" }}</p>
+            {% endif %}
+          </div>
+        </article>
+        {% endfor %}
+      {% elif details.status != "NO_MATCH" %}
+      <p class="text-body-secondary mb-0">{{ t("request.no_cards") }}</p>
+      {% endif %}
+
+      {% if is_admin and (details.can_approve or details.can_reject or details.can_override or details.can_retrigger) %}
+      <div class="d-flex flex-wrap gap-2">
+        {% if details.can_approve %}
+        <button id="approve" class="btn btn-kb" type="button" disabled data-working="{{ t('action.working') }}" data-success="{{ t('request.approved') }}">{{ t("action.approve") }}</button>
+        {% endif %}
+        {% if details.can_reject %}
+        <button id="reject-open" class="btn btn-outline-danger" type="button">{{ t("action.reject") }}</button>
+        {% endif %}
+        {% if details.can_retrigger %}
+        <button id="retrigger" class="btn btn-outline-secondary" type="button" data-working="{{ t('action.working') }}" data-success="{{ t('request.retriggered') }}">{{ t("action.retrigger") }}</button>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      {% if details.can_override %}
+      <form id="override-form" class="card border-0 shadow-sm">
+        <div class="card-body">
+          <h2 class="h6">{{ t("action.override") }}</h2>
+          <label class="form-label" for="override-volunteer">{{ t("dashboard.volunteer") }}</label>
+          <select class="form-select mb-3" id="override-volunteer" required>
+            <option value="">{{ t("request.pick_volunteer") }}</option>
+            {% for person in directory %}
+            <option value="{{ person.profile_id }}" dir="auto">{{ person.full_name }} · {{ person.city }}</option>
+            {% endfor %}
+          </select>
+          <label class="form-label" for="override-reason">{{ t("request.reason") }}</label>
+          <textarea class="form-control mb-3" id="override-reason" minlength="10" required></textarea>
+          <button id="override" class="btn btn-kb" type="submit" data-working="{{ t('action.working') }}" data-success="{{ t('request.overridden') }}">{{ t("action.override") }}</button>
+        </div>
+      </form>
+      {% endif %}
+
+      {% if details.can_exempt %}
+      <form id="exempt-form" class="card border-0 shadow-sm">
+        <div class="card-body">
+          <h2 class="h6">{{ t("action.exempt") }}</h2>
+          <label class="form-label" for="exempt-volunteer">{{ t("dashboard.volunteer") }}</label>
+          <select class="form-select mb-3" id="exempt-volunteer" required>
+            <option value="">{{ t("request.pick_volunteer") }}</option>
+            {% if directory %}
+              {% for person in directory %}
+              <option value="{{ person.user_id }}" dir="auto">{{ person.full_name }}</option>
+              {% endfor %}
+            {% else %}
+              {% for card in details.cards %}
+              <option value="{{ card.user_id }}" dir="auto">{{ card.full_name }}</option>
+              {% endfor %}
+            {% endif %}
+          </select>
+          <label class="form-label" for="exempt-reason">{{ t("request.reason") }}</label>
+          <textarea class="form-control mb-3" id="exempt-reason" required></textarea>
+          <button id="exempt" class="btn btn-outline-secondary" type="submit" data-working="{{ t('action.working') }}" data-success="{{ t('request.exempted') }}">{{ t("action.exempt") }}</button>
+        </div>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<dialog id="reject-dialog">
+  <form id="reject-form" method="dialog">
+    <h2 class="h5">{{ t("request.reject_title") }}</h2>
+    <label class="form-label" for="reject-reason">{{ t("request.reason") }}</label>
+    <textarea class="form-control mb-3" id="reject-reason" required></textarea>
+    <div class="d-flex gap-2 justify-content-end">
+      <button class="btn btn-outline-secondary" type="button" data-close>{{ t("action.back") }}</button>
+      <button id="reject-confirm" class="btn btn-danger" type="submit" data-working="{{ t('action.working') }}" data-success="{{ t('request.rejected') }}">{{ t("action.reject") }}</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="cancel-dialog">
+  <form id="cancel-form" method="dialog">
+    <h2 class="h5">{{ t("request.cancel_title") }}</h2>
+    <p>{{ t("request.volunteer_notified") if details.assigned else t("request.cancel_confirm") }}</p>
+    <div class="d-flex gap-2 justify-content-end">
+      <button class="btn btn-outline-secondary" type="button" data-close>{{ t("action.back") }}</button>
+      <button id="cancel-confirm" class="btn btn-danger" type="submit" data-working="{{ t('action.working') }}" data-success="{{ t('request.cancelled') }}">{{ t("action.cancel_request") }}</button>
+    </div>
+  </form>
+</dialog>
+{% endblock %}
+{% block scripts %}
+<script>
+  window.KB_REQUEST = {{ {
+    "genericError": t("js.generic_error"),
+    "networkError": t("js.network_error")
+  } | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/request-detail.js') }}"></script>
+{% endblock %}

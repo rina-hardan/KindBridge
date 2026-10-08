@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}{{ t("dashboard.title") }} · KindBridge{% endblock %}
+{% block content %}
+<header class="mb-4">
+  <h1 class="h4 mb-1">{{ t("dashboard.title") }}</h1>
+  <p class="text-body-secondary mb-0">{{ t("dashboard.lead") }}</p>
+</header>
+
+<section class="mb-4" aria-labelledby="open-counts">
+  <h2 id="open-counts" class="h6 mb-3">{{ t("dashboard.counts") }}</h2>
+  <div class="row g-3">
+    {% for status, count in dashboard.counts.as_rows() %}
+    <div class="col-6 col-lg-3">
+      <article class="card border-0 shadow-sm h-100">
+        <div class="card-body">
+          <p class="display-6 mb-1" data-status="{{ status }}">{{ count }}</p>
+          <p class="mb-0"><span class="badge kb-status kb-status-{{ status|lower }}">{{ t("status." + status) }}</span></p>
+        </div>
+      </article>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="mb-4" aria-labelledby="open-queue">
+  <h2 id="open-queue" class="h6 mb-3">{{ t("dashboard.queue") }}</h2>
+  {% if dashboard.requests %}
+  <div class="card border-0 shadow-sm">
+    <div class="table-responsive kb-table-wrap">
+      <table class="table table-hover align-middle mb-0 kb-table">
+        <caption class="visually-hidden">{{ t("dashboard.queue") }}</caption>
+        <thead>
+          <tr>
+            <th scope="col">{{ t("dashboard.requester") }}</th>
+            <th scope="col">{{ t("dashboard.category") }}</th>
+            <th scope="col">{{ t("field.city") }}</th>
+            <th scope="col">{{ t("dashboard.urgency") }}</th>
+            <th scope="col">{{ t("dashboard.status") }}</th>
+            <th scope="col">{{ t("dashboard.candidates") }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in dashboard.requests %}
+          <tr class="kb-row-link" tabindex="0" data-href="{{ url_for('requests.detail_page', request_id=item.request_id) }}">
+            <td dir="auto"><a href="{{ url_for('requests.detail_page', request_id=item.request_id) }}">{{ item.requester_name }}</a></td>
+            <td dir="auto">{{ item.category }}</td>
+            <td dir="auto">{{ item.city }}</td>
+            <td>{{ t("urgency." + item.urgency) }}</td>
+            <td>
+              <span class="badge kb-status kb-status-{{ item.status|lower }}">{{ t("status." + item.status) }}</span>
+              {% if item.overdue %}
+              <span class="badge kb-status kb-status-overdue">{{ t("status.OVERDUE") }}</span>
+              {% endif %}
+            </td>
+            <td data-candidates="{{ item.candidate_count }}">{{ item.candidate_count }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% if dashboard.page_count > 1 %}
+  <nav class="mt-3" aria-label="{{ t('dashboard.pages') }}">
+    <ul class="pagination mb-0">
+      <li class="page-item {% if not dashboard.has_previous %}disabled{% endif %}">
+        {% if dashboard.has_previous %}
+        <a class="page-link" href="{{ url_for('admin.dashboard_page', page=dashboard.page - 1) }}">{{ t("dashboard.prev") }}</a>
+        {% else %}
+        <span class="page-link">{{ t("dashboard.prev") }}</span>
+        {% endif %}
+      </li>
+      <li class="page-item disabled"><span class="page-link">{{ dashboard.page }} / {{ dashboard.page_count }}</span></li>
+      <li class="page-item {% if not dashboard.has_next %}disabled{% endif %}">
+        {% if dashboard.has_next %}
+        <a class="page-link" href="{{ url_for('admin.dashboard_page', page=dashboard.page + 1) }}">{{ t("dashboard.next") }}</a>
+        {% else %}
+        <span class="page-link">{{ t("dashboard.next") }}</span>
+        {% endif %}
+      </li>
+    </ul>
+  </nav>
+  {% endif %}
+  {% else %}
+  <p class="mb-0">{{ t("dashboard.empty") }}</p>
+  {% endif %}
+</section>
+
+<section aria-labelledby="capacity-gauges">
+  <h2 id="capacity-gauges" class="h6 mb-3">{{ t("dashboard.capacity") }}</h2>
+  <div class="row g-3">
+    {% for key, count in (("available", dashboard.gauges.available), ("busy", dashboard.gauges.busy), ("inactive", dashboard.gauges.inactive)) %}
+    <div class="col-md-4">
+      <article class="card border-0 shadow-sm h-100">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-baseline mb-2">
+            <h3 class="h6 mb-0">{{ t("gauge." + key) }}</h3>
+            <p class="h4 mb-0" data-gauge="{{ key }}">{{ count }}</p>
+          </div>
+          <div class="kb-gauge-track" role="img" aria-label="{{ t('gauge.' + key) }}: {{ count }}">
+            <div class="kb-gauge-fill" style="width: {{ dashboard.gauges.share(count) }}%"></div>
+          </div>
+        </div>
+      </article>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/rows.js') }}"></script>
+{% endblock %}

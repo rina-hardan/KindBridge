@@ -21,6 +21,7 @@ from sqlalchemy.engine import RowMapping
 
 from app.config import Config, ConfigError
 from app.domain.events import DomainEvent
+from app.projections.exemption_projector import ExemptionProjector
 from app.projections.match_projector import MatchProjector
 from app.projections.projectors import UserProjector
 from app.repositories.db import make_engine
@@ -60,7 +61,7 @@ def rebuild(engine: Engine, projectors: list[ReadModelProjector] | None = None) 
     Returns the number of events replayed.
     """
     if projectors is None:
-        projectors = [UserProjector(), MatchProjector()]
+        projectors = [UserProjector(), MatchProjector(), ExemptionProjector()]
     with engine.begin() as conn:
         _clear_projections(conn)
         events = _load_events(conn)

@@ -10,6 +10,7 @@ from sqlalchemy.engine import Connection
 
 from app.domain.matching import (
     AssignedTask,
+    FilterFacts,
     RequestRecord,
     TimeSlot,
     UnavailabilityPeriod,
@@ -30,6 +31,12 @@ from app.repositories.tables import (
 class PendingRequest:
     request_id: UUID
     match_attempt: int
+
+
+@dataclass(frozen=True)
+class NamedVolunteer:
+    volunteer: VolunteerRecord
+    full_name: str
 
 
 class SqlMatchingReader:
@@ -82,6 +89,29 @@ class SqlMatchingReader:
             return None
         return str(value)
 
+    def load_named_volunteers(self, conn: Connection) -> dict[UUID, NamedVolunteer]:
+        stmt = (
+            select(volunteer_profiles, users.c.is_active, users.c.full_name)
+            .join(users, users.c.id == volunteer_profiles.c.user_id)
+        )
+        found: dict[UUID, NamedVolunteer] = {}
+        for row in conn.execute(stmt).mappings():
+            record = _volunteer_record(row)
+            found[record.profile_id] = NamedVolunteer(volunteer=record, full_name=row["full_name"])
+        return found
+
+    def facts_for(
+        self, conn: Connection, request: RequestRecord, profile_ids: list[UUID], today: date
+    ) -> FilterFacts:
+        return FilterFacts(
+            request=request,
+            exemptions=self.exemption_user_ids(conn, request.requester_id),
+            declined_profile_ids=self.declined_profile_ids(conn, request.request_id),
+            periods=self.unavailability(conn, profile_ids),
+            assigned=self.assigned_tasks(conn, profile_ids),
+            today=today,
+        )
+
     def load_volunteers(self, conn: Connection, profile_ids: list[UUID]) -> dict[UUID, VolunteerRecord]:
         if not profile_ids:
             return {}
@@ -92,22 +122,8 @@ class SqlMatchingReader:
         )
         found: dict[UUID, VolunteerRecord] = {}
         for row in conn.execute(stmt).mappings():
-            profile_id = _uuid(row["id"])
-            found[profile_id] = VolunteerRecord(
-                profile_id=profile_id,
-                user_id=_uuid(row["user_id"]),
-                is_enabled=bool(row["is_enabled"]),
-                is_active=bool(row["is_active"]),
-                availability_status=row["availability_status"],
-                primary_city=row["primary_city"],
-                has_vehicle=bool(row["has_vehicle"]),
-                skills=tuple(_skills(row["skills_json"])),
-                base_frequency=row["base_frequency"],
-                max_active_tasks=int(row["max_active_tasks"]),
-                max_parallel_tasks=int(row["max_parallel_tasks"]),
-                current_active_tasks=int(row["current_active_tasks"]),
-                current_parallel_tasks=int(row["current_parallel_tasks"]),
-            )
+            record = _volunteer_record(row)
+            found[record.profile_id] = record
         return found
 
     def exemption_user_ids(self, conn: Connection, requester_id: UUID) -> frozenset[UUID]:
@@ -175,6 +191,24 @@ class SqlMatchingReader:
                 )
             )
         return tuple(tasks)
+
+
+def _volunteer_record(row) -> VolunteerRecord:
+    return VolunteerRecord(
+        profile_id=_uuid(row["id"]),
+        user_id=_uuid(row["user_id"]),
+        is_enabled=bool(row["is_enabled"]),
+        is_active=bool(row["is_active"]),
+        availability_status=row["availability_status"],
+        primary_city=row["primary_city"],
+        has_vehicle=bool(row["has_vehicle"]),
+        skills=tuple(_skills(row["skills_json"])),
+        base_frequency=row["base_frequency"],
+        max_active_tasks=int(row["max_active_tasks"]),
+        max_parallel_tasks=int(row["max_parallel_tasks"]),
+        current_active_tasks=int(row["current_active_tasks"]),
+        current_parallel_tasks=int(row["current_parallel_tasks"]),
+    )
 
 
 def _uuid(value) -> UUID:

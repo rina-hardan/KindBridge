@@ -3,7 +3,7 @@
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any, ClassVar
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
 
 from app.domain import events as ev
 from app.domain.errors import ConcurrencyConflict, DomainError
@@ -101,6 +101,19 @@ class User(AggregateRoot):
     aggregate_type = "User"
 
 
+OPEN_REQUEST_STATUSES = ("PENDING_REVIEW", "MATCH_PROPOSED", "NO_MATCH", "ASSIGNED")
+_OVERRIDE_STATUSES = ("MATCH_PROPOSED", "NO_MATCH")
+
+
+class ProposalState:
+    """One proposed volunteer still tracked on the help-request stream."""
+
+    def __init__(self, assignment_id: UUID, volunteer_id: UUID, status: str) -> None:
+        self.assignment_id = assignment_id
+        self.volunteer_id = volunteer_id
+        self.status = status
+
+
 class HelpRequest(AggregateRoot):
     """Help-request stream. Propose is idempotent per ``match_attempt``."""
 
@@ -112,9 +125,24 @@ class HelpRequest(AggregateRoot):
         self.match_attempt = 0
         self.concurrency_type = "UNKNOWN"
         self.completed_attempts: set[int] = set()
+        self.requester_id: UUID | None = None
+        self.proposals: list[ProposalState] = []
+        self.assigned_volunteer_id: UUID | None = None
 
     def already_proposed(self, match_attempt: int) -> bool:
         return match_attempt in self.completed_attempts
+
+    def restore(self, history: Sequence[DomainEvent]) -> None:
+        """Fold the stream into decision state. Safe to call again on the same history."""
+        self.status = ""
+        self.match_attempt = 0
+        self.concurrency_type = "UNKNOWN"
+        self.completed_attempts = set()
+        self.requester_id = None
+        self.proposals = []
+        self.assigned_volunteer_id = None
+        for event in history:
+            self._fold(event)
 
     def record_match(self, match_attempt: int, payloads: list[tuple[str, dict[str, Any]]]) -> None:
         """Append classification and MatchesProposed or NoMatchFound for this attempt.
@@ -130,7 +158,158 @@ class HelpRequest(AggregateRoot):
                 f"match_attempt {match_attempt} does not match the stream head {self.match_attempt}"
             )
         for event_type, payload in payloads:
-            self.raise_event(event_type, payload)
+            self._fold(self.raise_event(event_type, payload))
+
+    def approve(self, assignment_id: UUID, approved_by: UUID) -> UUID:
+        """Choose one current proposal. Returns that proposal's volunteer profile id."""
+        if self.status != "MATCH_PROPOSED":
+            raise DomainError("Help request is not waiting for approval")
+        chosen = next(
+            (
+                item
+                for item in self.proposals
+                if item.assignment_id == assignment_id and item.status == "PROPOSED"
+            ),
+            None,
+        )
+        if chosen is None:
+            raise DomainError("Choose one proposed volunteer")
+        self._fold(
+            self.raise_event(
+                "AssignmentApproved",
+                {
+                    "assignment_id": str(assignment_id),
+                    "volunteer_id": str(chosen.volunteer_id),
+                    "approved_by": str(approved_by),
+                },
+            )
+        )
+        return chosen.volunteer_id
+
+    def reject_proposals(self, reason: str) -> None:
+        if self.status != "MATCH_PROPOSED":
+            raise DomainError("Help request is not waiting for approval")
+        volunteer_ids = [str(item.volunteer_id) for item in self.proposals if item.status == "PROPOSED"]
+        if not volunteer_ids:
+            raise DomainError("There are no proposals to reject")
+        self._fold(
+            self.raise_event(
+                "AssignmentsRejected",
+                {"volunteer_ids": volunteer_ids, "reason": reason},
+            )
+        )
+
+    def override(self, assignment_id: UUID, volunteer_id: UUID, reason: str, approved_by: UUID) -> None:
+        if self.status not in _OVERRIDE_STATUSES:
+            raise DomainError("Override is only available when matches were proposed or none were found")
+        self._fold(
+            self.raise_event(
+                "AssignmentOverridden",
+                {
+                    "assignment_id": str(assignment_id),
+                    "volunteer_id": str(volunteer_id),
+                    "override_reason": reason,
+                    "approved_by": str(approved_by),
+                    "match_attempt": self.match_attempt,
+                },
+            )
+        )
+
+    def retrigger(self) -> None:
+        if self.status not in _OVERRIDE_STATUSES:
+            raise DomainError("Match can only be retriggered when matches were proposed or none were found")
+        self._fold(self.raise_event("MatchRetriggered", {}))
+
+    def cancel(self, cancelled_by: UUID, reason: str) -> None:
+        if self.status not in OPEN_REQUEST_STATUSES:
+            raise DomainError("This request can no longer be cancelled")
+        self._fold(
+            self.raise_event(
+                "HelpRequestCancelled",
+                {"cancelled_by": str(cancelled_by), "reason": reason},
+            )
+        )
+
+    def _fold(self, event: DomainEvent) -> None:
+        payload = event.payload
+        kind = event.event_type
+        if kind == "HelpRequestCreated":
+            self.status = "PENDING_REVIEW"
+            self.concurrency_type = str(payload.get("concurrency_type") or "UNKNOWN")
+            requester = payload.get("requester_id")
+            if requester:
+                self.requester_id = UUID(str(requester))
+            if payload.get("match_attempt") is not None:
+                self.match_attempt = int(payload["match_attempt"])
+            return
+        if kind == "ConcurrencyClassified" and payload.get("concurrency_type"):
+            self.concurrency_type = str(payload["concurrency_type"])
+            return
+        if kind in ("MatchesProposed", "NoMatchFound"):
+            attempt = int(payload["match_attempt"])
+            self.completed_attempts.add(attempt)
+            self.match_attempt = attempt + 1
+            if kind == "MatchesProposed":
+                self.status = "MATCH_PROPOSED"
+                self.proposals = _proposals_from(payload)
+            else:
+                self.status = "NO_MATCH"
+                self.proposals = []
+            return
+        if kind == "MatchRetriggered":
+            self.status = "PENDING_REVIEW"
+            _supersede_open(self.proposals)
+            return
+        if kind == "AssignmentsRejected":
+            self.status = "PENDING_REVIEW"
+            declined = {str(item) for item in payload.get("volunteer_ids") or []}
+            for proposal in self.proposals:
+                if proposal.status == "PROPOSED" and str(proposal.volunteer_id) in declined:
+                    proposal.status = "DECLINED"
+            return
+        if kind == "AssignmentApproved":
+            self.status = "ASSIGNED"
+            chosen = UUID(str(payload["assignment_id"]))
+            self.assigned_volunteer_id = UUID(str(payload["volunteer_id"]))
+            for proposal in self.proposals:
+                if proposal.assignment_id == chosen:
+                    proposal.status = "ASSIGNED"
+                elif proposal.status == "PROPOSED":
+                    proposal.status = "SUPERSEDED"
+            return
+        if kind == "AssignmentOverridden":
+            self.status = "ASSIGNED"
+            self.assigned_volunteer_id = UUID(str(payload["volunteer_id"]))
+            _supersede_open(self.proposals)
+            return
+        if kind == "HelpRequestCancelled":
+            self.status = "CANCELLED"
+            _supersede_open(self.proposals)
+            self.assigned_volunteer_id = None
+
+
+def _proposals_from(payload: Mapping[str, Any]) -> list[ProposalState]:
+    items = payload.get("proposals") or payload.get("matches") or []
+    found: list[ProposalState] = []
+    if not isinstance(items, list):
+        return found
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        raw_assignment = item.get("assignment_id")
+        raw_volunteer = item.get("volunteer_id")
+        if not raw_assignment or not raw_volunteer:
+            continue
+        found.append(
+            ProposalState(UUID(str(raw_assignment)), UUID(str(raw_volunteer)), "PROPOSED")
+        )
+    return found
+
+
+def _supersede_open(proposals: list[ProposalState]) -> None:
+    for proposal in proposals:
+        if proposal.status == "PROPOSED":
+            proposal.status = "SUPERSEDED"
 
 
 class VolunteerProfile(AggregateRoot):
@@ -138,7 +317,14 @@ class VolunteerProfile(AggregateRoot):
 
 
 class ExemptionLink(AggregateRoot):
+    """One stream per volunteer/requester pair. The id is uuid5 of that pair."""
+
     aggregate_type = "ExemptionLink"
+    _NAMESPACE = UUID("6b1e1c4a-9a3e-4f0d-9c2a-1b7e5d0a8f31")
+
+    @staticmethod
+    def stream_id(volunteer_user_id: UUID, requester_id: UUID) -> UUID:
+        return uuid5(ExemptionLink._NAMESPACE, f"{volunteer_user_id}:{requester_id}")
 
 
 class UserAggregate:

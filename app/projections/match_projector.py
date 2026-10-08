@@ -6,10 +6,10 @@ from datetime import date, datetime, time, timezone
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Connection, insert, update
+from sqlalchemy import Connection, case, insert, select, update
 
 from app.domain.events import DomainEvent
-from app.repositories.tables import help_requests, task_assignments
+from app.repositories.tables import help_requests, task_assignments, volunteer_profiles
 
 
 def _naive_utc(value: datetime) -> datetime:
@@ -25,6 +25,11 @@ class MatchProjector:
             "ConcurrencyClassified": self._on_classified,
             "MatchesProposed": self._on_proposed,
             "NoMatchFound": self._on_no_match,
+            "MatchRetriggered": self._on_retriggered,
+            "AssignmentApproved": self._on_approved,
+            "AssignmentsRejected": self._on_rejected,
+            "AssignmentOverridden": self._on_overridden,
+            "HelpRequestCancelled": self._on_cancelled,
         }
 
     def __call__(self, events: Sequence[DomainEvent], connection: Any) -> None:
@@ -109,6 +114,118 @@ class MatchProjector:
             .where(help_requests.c.id == event.aggregate_id)
             .values(status="NO_MATCH", match_attempt=attempt + 1)
         )
+
+    def _on_retriggered(self, conn: Connection, event: DomainEvent) -> None:
+        stamp = _naive_utc(event.created_at)
+        _supersede_proposed(conn, event.aggregate_id, stamp)
+        conn.execute(
+            update(help_requests).where(help_requests.c.id == event.aggregate_id).values(status="PENDING_REVIEW")
+        )
+
+    def _on_approved(self, conn: Connection, event: DomainEvent) -> None:
+        stamp = _naive_utc(event.created_at)
+        assignment_id = _uuid(event.payload["assignment_id"])
+        volunteer_id = _uuid(event.payload["volunteer_id"])
+        conn.execute(
+            update(task_assignments)
+            .where(task_assignments.c.id == assignment_id)
+            .values(status="ASSIGNED", approved_by=_uuid(event.payload["approved_by"]), updated_at=stamp)
+        )
+        _supersede_proposed(conn, event.aggregate_id, stamp)
+        conn.execute(
+            update(help_requests).where(help_requests.c.id == event.aggregate_id).values(status="ASSIGNED")
+        )
+        _shift_capacity(conn, volunteer_id, _concurrency(conn, event.aggregate_id), 1)
+
+    def _on_rejected(self, conn: Connection, event: DomainEvent) -> None:
+        stamp = _naive_utc(event.created_at)
+        volunteer_ids = [_uuid(item) for item in event.payload.get("volunteer_ids") or []]
+        if volunteer_ids:
+            conn.execute(
+                update(task_assignments)
+                .where(task_assignments.c.request_id == event.aggregate_id)
+                .where(task_assignments.c.status == "PROPOSED")
+                .where(task_assignments.c.volunteer_id.in_(volunteer_ids))
+                .values(status="DECLINED", decline_reason=event.payload.get("reason") or "", updated_at=stamp)
+            )
+        conn.execute(
+            update(help_requests).where(help_requests.c.id == event.aggregate_id).values(status="PENDING_REVIEW")
+        )
+
+    def _on_overridden(self, conn: Connection, event: DomainEvent) -> None:
+        stamp = _naive_utc(event.created_at)
+        volunteer_id = _uuid(event.payload["volunteer_id"])
+        _supersede_proposed(conn, event.aggregate_id, stamp)
+        conn.execute(
+            insert(task_assignments).values(
+                id=_uuid(event.payload["assignment_id"]),
+                request_id=event.aggregate_id,
+                volunteer_id=volunteer_id,
+                ai_score=None,
+                ai_rationale=None,
+                rank_in_batch=None,
+                match_attempt=int(event.payload.get("match_attempt") or 0),
+                approved_by=_uuid(event.payload["approved_by"]),
+                status="ASSIGNED",
+                decline_reason=None,
+                override_reason=str(event.payload.get("override_reason") or "")[:500],
+                updated_at=stamp,
+            )
+        )
+        conn.execute(
+            update(help_requests).where(help_requests.c.id == event.aggregate_id).values(status="ASSIGNED")
+        )
+        _shift_capacity(conn, volunteer_id, _concurrency(conn, event.aggregate_id), 1)
+
+    def _on_cancelled(self, conn: Connection, event: DomainEvent) -> None:
+        stamp = _naive_utc(event.created_at)
+        assigned = conn.execute(
+            select(task_assignments.c.volunteer_id)
+            .where(task_assignments.c.request_id == event.aggregate_id)
+            .where(task_assignments.c.status == "ASSIGNED")
+        ).scalar()
+        if assigned is not None:
+            _shift_capacity(conn, _uuid(assigned), _concurrency(conn, event.aggregate_id), -1)
+            conn.execute(
+                update(task_assignments)
+                .where(task_assignments.c.request_id == event.aggregate_id)
+                .where(task_assignments.c.status == "ASSIGNED")
+                .values(status="DECLINED", decline_reason=event.payload.get("reason") or "", updated_at=stamp)
+            )
+        _supersede_proposed(conn, event.aggregate_id, stamp)
+        conn.execute(
+            update(help_requests).where(help_requests.c.id == event.aggregate_id).values(status="CANCELLED")
+        )
+
+
+def _supersede_proposed(conn: Connection, request_id: UUID, stamp: datetime) -> None:
+    conn.execute(
+        update(task_assignments)
+        .where(task_assignments.c.request_id == request_id)
+        .where(task_assignments.c.status == "PROPOSED")
+        .values(status="SUPERSEDED", updated_at=stamp)
+    )
+
+
+def _concurrency(conn: Connection, request_id: UUID) -> str:
+    value = conn.execute(
+        select(help_requests.c.concurrency_type).where(help_requests.c.id == request_id)
+    ).scalar()
+    return str(value or "UNKNOWN")
+
+
+def _shift_capacity(conn: Connection, profile_id: UUID, concurrency: str, delta: int) -> None:
+    if concurrency == "PARALLEL_OK":
+        column = volunteer_profiles.c.current_parallel_tasks
+        key = "current_parallel_tasks"
+    else:
+        column = volunteer_profiles.c.current_active_tasks
+        key = "current_active_tasks"
+    conn.execute(
+        update(volunteer_profiles)
+        .where(volunteer_profiles.c.id == profile_id)
+        .values(**{key: case((column + delta < 0, 0), else_=column + delta)})
+    )
 
 
 def _uuid(value: Any) -> UUID:

@@ -215,6 +215,17 @@ def rank_proposals(scored: Sequence[ScoredVolunteer]) -> list[ScoredVolunteer]:
     return list(ordered[:PROPOSAL_LIMIT])
 
 
+def capacity_or_overlap(volunteer: VolunteerRecord, facts: FilterFacts) -> str | None:
+    """Capacity and schedule checks used again when a dispatcher approves a proposal."""
+    request = facts.request
+    concurrency = effective_concurrency(request.concurrency_type)
+    if _over_capacity(volunteer, concurrency):
+        return CAPACITY
+    if _overlaps_assigned(volunteer.profile_id, request.slot, concurrency, facts.assigned):
+        return SCHEDULE_OVERLAP
+    return None
+
+
 def rejection_reason(volunteer: VolunteerRecord, facts: FilterFacts) -> str | None:
     """First failing check in system-spec 4.2 order, or None when the volunteer stays."""
     request = facts.request

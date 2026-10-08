@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}{{ t("requests.list_title") }} · KindBridge{% endblock %}
+{% block content %}
+<header class="mb-4">
+  <h1 class="h4 mb-1">{{ t("requests.list_title") }}</h1>
+  <p class="text-body-secondary mb-0">{{ t("requests.list_lead") }}</p>
+</header>
+
+<form class="card border-0 shadow-sm mb-4" method="get" action="{{ url_for('requests.search_page') }}">
+  <div class="card-body">
+    <div class="row g-3 align-items-end">
+      <div class="col-md-3">
+        <label class="form-label" for="filter-category">{{ t("dashboard.category") }}</label>
+        <select class="form-select" id="filter-category" name="category">
+          <option value="">{{ t("requests.any") }}</option>
+          {% for value in search.categories %}
+          <option value="{{ value }}" {% if value == search.category %}selected{% endif %} dir="auto">{{ value }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="filter-city">{{ t("field.city") }}</label>
+        <select class="form-select" id="filter-city" name="city">
+          <option value="">{{ t("requests.any") }}</option>
+          {% for value in search.cities %}
+          <option value="{{ value }}" {% if value == search.city %}selected{% endif %} dir="auto">{{ value }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label" for="filter-urgency">{{ t("dashboard.urgency") }}</label>
+        <select class="form-select" id="filter-urgency" name="urgency">
+          <option value="">{{ t("requests.any") }}</option>
+          {% for value in search.urgencies %}
+          <option value="{{ value }}" {% if value == search.urgency %}selected{% endif %}>{{ t("urgency." + value) }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label" for="filter-status">{{ t("dashboard.status") }}</label>
+        <select class="form-select" id="filter-status" name="status">
+          <option value="">{{ t("requests.any") }}</option>
+          {% for value in search.statuses %}
+          <option value="{{ value }}" {% if value == search.status %}selected{% endif %}>{{ t("status." + value) }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-2">
+        <button class="btn btn-kb w-100" type="submit">{{ t("requests.filter") }}</button>
+      </div>
+    </div>
+  </div>
+</form>
+
+{% if search.rows %}
+<div class="card border-0 shadow-sm">
+  <div class="table-responsive kb-table-wrap">
+    <table class="table table-hover align-middle mb-0 kb-table">
+      <caption class="visually-hidden">{{ t("requests.list_title") }}</caption>
+      <thead>
+        <tr>
+          <th scope="col">{{ t("dashboard.requester") }}</th>
+          <th scope="col">{{ t("dashboard.category") }}</th>
+          <th scope="col">{{ t("field.city") }}</th>
+          <th scope="col">{{ t("dashboard.urgency") }}</th>
+          <th scope="col">{{ t("dashboard.status") }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in search.rows %}
+        <tr class="kb-row-link" tabindex="0" data-href="{{ url_for('requests.detail_page', request_id=item.request_id) }}">
+          <td dir="auto"><a href="{{ url_for('requests.detail_page', request_id=item.request_id) }}">{{ item.requester_name }}</a></td>
+          <td dir="auto">{{ item.category }}</td>
+          <td dir="auto">{{ item.city }}</td>
+          <td>{{ t("urgency." + item.urgency) }}</td>
+          <td>
+            <span class="badge kb-status kb-status-{{ item.status|lower }}">{{ t("status." + item.status) }}</span>
+            {% if item.overdue %}
+            <span class="badge kb-status kb-status-overdue">{{ t("status.OVERDUE") }}</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% if search.page_count > 1 %}
+<nav class="mt-3" aria-label="{{ t('dashboard.pages') }}">
+  <ul class="pagination mb-0">
+    <li class="page-item {% if not search.has_previous %}disabled{% endif %}">
+      {% if search.has_previous %}
+      <a class="page-link" href="{{ url_for('requests.search_page', page=search.page - 1, category=search.category, city=search.city, urgency=search.urgency, status=search.status) }}">{{ t("dashboard.prev") }}</a>
+      {% else %}
+      <span class="page-link">{{ t("dashboard.prev") }}</span>
+      {% endif %}
+    </li>
+    <li class="page-item disabled"><span class="page-link">{{ search.page }} / {{ search.page_count }}</span></li>
+    <li class="page-item {% if not search.has_next %}disabled{% endif %}">
+      {% if search.has_next %}
+      <a class="page-link" href="{{ url_for('requests.search_page', page=search.page + 1, category=search.category, city=search.city, urgency=search.urgency, status=search.status) }}">{{ t("dashboard.next") }}</a>
+      {% else %}
+      <span class="page-link">{{ t("dashboard.next") }}</span>
+      {% endif %}
+    </li>
+  </ul>
+</nav>
+{% endif %}
+{% else %}
+<p class="mb-0">{{ t("requests.empty") }}</p>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/rows.js') }}"></script>
+{% endblock %}
