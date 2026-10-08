@@ -1,4 +1,4 @@
-"""Help-request assignment commands. Each one appends events through the store."""
+"""Help-request commands. Submit, cancel, and the assignment actions each append events."""
 
 import logging
 from dataclasses import dataclass
@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import Engine
 
 from app.commands.bus import Command, CommandBus
+from app.commands.dtos import CancelRequestCommand, SubmitHelpRequestCommand
 from app.commands.user_commands import Clock, utc_now
 from app.domain.aggregates import HelpRequest
 from app.domain.errors import ConcurrencyConflict, DomainError, Forbidden, NotFound, ValidationError
@@ -15,6 +16,7 @@ from app.domain.matching import capacity_or_overlap, is_self_assignment, rejecti
 from app.projections.match_projector import MatchProjector
 from app.repositories.event_store import SqlEventStore
 from app.repositories.matching import SqlMatchingReader
+from app.repositories.users import UserRepository
 
 logger = logging.getLogger(__name__)
 
@@ -81,24 +83,8 @@ class RetriggerMatchCommand(Command):
 
 
 @dataclass(frozen=True)
-class CancelRequestCommand(Command):
+class SubmitHelpRequestResult:
     request_id: UUID
-    actor_id: UUID
-    actor_is_admin: bool
-    reason: str
-
-    @classmethod
-    def from_payload(cls, request_id: UUID, actor_id: UUID, actor_is_admin: bool, data: Any) -> "CancelRequestCommand":
-        if data is None:
-            data = {}
-        body = _object(data)
-        raw = body.get("reason")
-        reason = raw.strip() if isinstance(raw, str) else ""
-        if not reason:
-            reason = "cancelled"
-        if len(reason) > 500:
-            raise ValidationError({"reason": "Must be at most 500 characters"})
-        return cls(request_id=request_id, actor_id=actor_id, actor_is_admin=actor_is_admin, reason=reason)
 
 
 class RequestCommandHandlers:
@@ -108,20 +94,61 @@ class RequestCommandHandlers:
         event_store: SqlEventStore,
         reader: SqlMatchingReader,
         projector: MatchProjector,
+        users: UserRepository,
         clock: Clock = utc_now,
     ) -> None:
         self._engine = engine
         self._event_store = event_store
         self._reader = reader
         self._projector = projector
+        self._users = users
         self._clock = clock
 
     def register_on(self, bus: CommandBus) -> None:
+        bus.register(SubmitHelpRequestCommand, self.submit)
         bus.register(ApproveAssignmentCommand, self.approve)
         bus.register(RejectAssignmentCommand, self.reject)
         bus.register(OverrideAssignmentCommand, self.override)
         bus.register(RetriggerMatchCommand, self.retrigger)
         bus.register(CancelRequestCommand, self.cancel)
+
+    def submit(self, cmd: SubmitHelpRequestCommand) -> SubmitHelpRequestResult:
+        now = self._clock()
+        request = HelpRequest()
+        request.submit(
+            {
+                "requester_id": str(cmd.requester_id),
+                "series_id": None,
+                "city": cmd.city,
+                "address": cmd.address,
+                "category": cmd.category,
+                "resource_type": cmd.resource_type,
+                "description": cmd.description,
+                "urgency": cmd.urgency,
+                "preferred_date": cmd.preferred_date,
+                "preferred_time_from": cmd.preferred_time_from,
+                "preferred_time_to": cmd.preferred_time_to,
+                "estimated_duration_min": cmd.estimated_duration_min,
+                "required_skills": list(cmd.required_skills),
+                "requires_vehicle": cmd.requires_vehicle,
+                "concurrency_type": "UNKNOWN",
+                "match_attempt": 0,
+            },
+            now,
+        )
+        pending = request.uncommitted_events()
+        with self._engine.begin() as conn:
+            account = self._users.get_account(conn, cmd.requester_id)
+            if account is None or not account.is_active:
+                raise NotFound("User not found")
+            if account.is_admin:
+                raise Forbidden("An admin account cannot ask for help")
+            if self._users.requester_profile_id(conn, cmd.requester_id) is None:
+                raise Forbidden("Register to ask for help before submitting a request")
+            self._event_store.append_in(conn, request.aggregate_id, 0, pending)
+            self._projector.apply(pending, conn)
+        request.mark_committed()
+        return SubmitHelpRequestResult(request_id=request.aggregate_id)
 
     def approve(self, command: ApproveAssignmentCommand) -> None:
         request = self._load(command.request_id)
@@ -150,10 +177,10 @@ class RequestCommandHandlers:
 
     def cancel(self, command: CancelRequestCommand) -> None:
         request = self._load(command.request_id)
-        if not command.actor_is_admin and request.requester_id != command.actor_id:
+        if not command.is_admin and request.requester_id != command.actor_id:
             raise Forbidden("Your role cannot perform this action")
         notify = request.status == "ASSIGNED"
-        request.cancel(command.actor_id, command.reason)
+        request.cancel(command.actor_id, command.reason, self._clock())
         self._commit(request)
         if notify:
             logger.info("gmail_notify_skipped request=%s", request.aggregate_id)

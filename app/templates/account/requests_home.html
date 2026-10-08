@@ -1,11 +1,301 @@
 {% extends "base.html" %}
 {% block title %}{{ t("requests.title") }} · KindBridge{% endblock %}
 {% block content %}
-<div class="card border-0 shadow-sm">
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+  <div>
+    <h1 class="h4 mb-1">{{ t("requests.title") }}</h1>
+    <p class="text-body-secondary small mb-0">{{ t("requests.lead") }}</p>
+  </div>
+  <a class="btn btn-kb" href="{{ url_for('account.new_request_page') }}">{{ t("requests.new") }}</a>
+</div>
+
+<div class="card border-0 shadow-sm mb-4">
   <div class="card-body p-4">
-    <h1 class="h4 mb-2">{{ t("requests.title") }}</h1>
-    <p class="mb-4">{{ t("requests.body") }}</p>
-    <a class="btn btn-outline-secondary" href="{{ url_for('account.profile_page') }}">{{ t("requester.back") }}</a>
+    <form id="request-filters" class="row g-3 align-items-end">
+      <div class="col-6 col-md-3">
+        <label class="form-label" for="filter-status">{{ t("requests.status") }}</label>
+        <select id="filter-status" name="status" class="form-select">
+          <option value="open" selected>{{ t("requests.open") }}</option>
+          <option value="all">{{ t("requests.all") }}</option>
+          {% for code in statuses %}
+          <option value="{{ code }}">{{ t("status." ~ code) }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-3">
+        <label class="form-label" for="filter-category">{{ t("requests.category") }}</label>
+        <select id="filter-category" name="category" class="form-select">
+          <option value="">{{ t("requests.all") }}</option>
+          {% for code in categories %}
+          <option value="{{ code }}">{{ t("category." ~ code) }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label" for="filter-urgency">{{ t("requests.urgency") }}</label>
+        <select id="filter-urgency" name="urgency" class="form-select">
+          <option value="">{{ t("requests.all") }}</option>
+          {% for code in urgencies %}
+          <option value="{{ code }}">{{ t("urgency." ~ code) }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label" for="filter-city">{{ t("field.city") }}</label>
+        <input id="filter-city" name="city" class="form-control" dir="auto">
+      </div>
+      <div class="col-12 col-md-2 d-flex gap-2">
+        <button type="submit" class="btn btn-kb flex-grow-1" id="filter-apply">{{ t("requests.filter") }}</button>
+        <button type="button" class="btn btn-outline-secondary" id="filter-clear">{{ t("requests.clear") }}</button>
+      </div>
+    </form>
   </div>
 </div>
+
+<div id="list-error" class="alert alert-danger d-none" role="alert"></div>
+
+<div class="card border-0 shadow-sm">
+  <div class="table-responsive">
+    <table class="table mb-0 align-middle kb-table">
+      <thead>
+        <tr>
+          <th scope="col">{{ t("requests.status") }}</th>
+          <th scope="col">{{ t("requests.category") }}</th>
+          <th scope="col">{{ t("field.city") }}</th>
+          <th scope="col">{{ t("requests.urgency") }}</th>
+          <th scope="col">{{ t("requests.date") }}</th>
+          <th scope="col">{{ t("requests.description") }}</th>
+          <th scope="col">{{ t("requests.actions") }}</th>
+        </tr>
+      </thead>
+      <tbody id="request-rows">
+        <tr><td colspan="7" class="text-body-secondary">{{ t("requests.loading") }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+<nav class="d-flex justify-content-between align-items-center mt-3" aria-label="{{ t("requests.title") }}">
+  <button type="button" class="btn btn-outline-secondary btn-sm" id="page-prev">{{ t("requests.previous") }}</button>
+  <span id="page-label" class="small text-body-secondary"></span>
+  <button type="button" class="btn btn-outline-secondary btn-sm" id="page-next">{{ t("requests.next") }}</button>
+</nav>
+
+<dialog id="cancel-dialog" class="kb-dialog">
+  <h2 class="h5" id="cancel-title">{{ t("requests.cancel_title") }}</h2>
+  <p id="cancel-body">{{ t("requests.cancel_body") }}</p>
+  <p id="cancel-assigned" class="d-none">{{ t("requests.cancel_assigned") }}</p>
+  <div id="cancel-error" class="alert alert-danger d-none" role="alert"></div>
+  <div class="d-flex gap-2 mt-4">
+    <button type="button" class="btn btn-danger" id="cancel-confirm">{{ t("requests.confirm_cancel") }}</button>
+    <button type="button" class="btn btn-outline-secondary" id="cancel-dismiss">{{ t("requests.keep") }}</button>
+  </div>
+</dialog>
+{% endblock %}
+{% block scripts %}
+<script>
+  const copy = {{ {
+    "empty": t("requests.empty"),
+    "emptyFiltered": t("requests.empty_filtered"),
+    "loading": t("requests.loading"),
+    "cancel": t("requests.cancel"),
+    "overdue": t("requests.overdue"),
+    "status": {
+      "PENDING_REVIEW": t("status.PENDING_REVIEW"),
+      "MATCH_PROPOSED": t("status.MATCH_PROPOSED"),
+      "NO_MATCH": t("status.NO_MATCH"),
+      "ASSIGNED": t("status.ASSIGNED"),
+      "COMPLETED": t("status.COMPLETED"),
+      "CANCELLED": t("status.CANCELLED")
+    },
+    "category": {
+      "errands": t("category.errands"),
+      "transport": t("category.transport"),
+      "shopping": t("category.shopping"),
+      "companionship": t("category.companionship"),
+      "home_help": t("category.home_help"),
+      "childcare": t("category.childcare"),
+      "tutoring": t("category.tutoring"),
+      "translation": t("category.translation"),
+      "first_aid": t("category.first_aid")
+    },
+    "urgency": {
+      "LOW": t("urgency.LOW"),
+      "NORMAL": t("urgency.NORMAL"),
+      "HIGH": t("urgency.HIGH"),
+      "EMERGENCY": t("urgency.EMERGENCY")
+    }
+  } | tojson }};
+
+  const form = document.getElementById("request-filters");
+  const rows = document.getElementById("request-rows");
+  const listError = document.getElementById("list-error");
+  const dialog = document.getElementById("cancel-dialog");
+  const assignedNote = document.getElementById("cancel-assigned");
+  const cancelError = document.getElementById("cancel-error");
+  const confirmButton = document.getElementById("cancel-confirm");
+  let page = 1;
+  let pendingId = "";
+
+  function params() {
+    const data = new FormData(form);
+    const query = new URLSearchParams();
+    ["status", "category", "urgency", "city"].forEach((name) => {
+      const value = String(data.get(name) || "").trim();
+      if (value) query.set(name, value);
+    });
+    query.set("page", String(page));
+    return query;
+  }
+
+  function filtersAreDefault() {
+    const data = new FormData(form);
+    return data.get("status") === "open" && !String(data.get("category") || "") && !String(data.get("urgency") || "") && !String(data.get("city") || "").trim();
+  }
+
+  function badge(className, text) {
+    const span = document.createElement("span");
+    span.className = "badge " + className;
+    span.textContent = text;
+    return span;
+  }
+
+  function statusBadge(status) {
+    const tone = {
+      PENDING_REVIEW: "text-bg-warning",
+      MATCH_PROPOSED: "text-bg-info",
+      NO_MATCH: "text-bg-secondary",
+      ASSIGNED: "text-bg-primary",
+      COMPLETED: "text-bg-success",
+      CANCELLED: "text-bg-dark"
+    };
+    return badge(tone[status] || "text-bg-secondary", copy.status[status] || status);
+  }
+
+  function render(data) {
+    rows.replaceChildren();
+    if (!data.items.length) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 7;
+      td.className = "text-body-secondary";
+      td.textContent = filtersAreDefault() ? copy.empty : copy.emptyFiltered;
+      tr.append(td);
+      rows.append(tr);
+    }
+    data.items.forEach((item) => {
+      const tr = document.createElement("tr");
+      const statusCell = document.createElement("td");
+      statusCell.className = "d-flex flex-wrap gap-1";
+      statusCell.append(statusBadge(item.status));
+      if (item.overdue) statusCell.append(badge("text-bg-danger", copy.overdue));
+      const description = document.createElement("td");
+      description.className = "kb-clip";
+      description.textContent = item.description;
+      description.title = item.description;
+      const action = document.createElement("td");
+      if (item.can_cancel) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "btn btn-outline-danger btn-sm";
+        button.textContent = copy.cancel;
+        button.addEventListener("click", () => openCancel(item));
+        action.append(button);
+      }
+      tr.append(
+        statusCell,
+        textCell(copy.category[item.category] || item.category),
+        textCell(item.city),
+        textCell(copy.urgency[item.urgency] || item.urgency),
+        textCell(item.preferred_date || "—"),
+        description,
+        action
+      );
+      rows.append(tr);
+    });
+    const pages = Math.max(1, Math.ceil(data.total / data.page_size));
+    document.getElementById("page-label").textContent = data.total ? page + " / " + pages : "";
+    document.getElementById("page-prev").disabled = page <= 1;
+    document.getElementById("page-next").disabled = page * data.page_size >= data.total;
+  }
+
+  function textCell(value) {
+    const td = document.createElement("td");
+    td.textContent = value;
+    return td;
+  }
+
+  async function load() {
+    listError.classList.add("d-none");
+    const apply = document.getElementById("filter-apply");
+    apply.disabled = true;
+    try {
+      const response = await fetch("/api/me/requests?" + params().toString(), { credentials: "same-origin" });
+      const data = await response.json().catch(() => ({}));
+      if (response.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
+      if (!response.ok) {
+        listError.textContent = data.message || window.KB_TEXT.genericError;
+        listError.classList.remove("d-none");
+        return;
+      }
+      render(data);
+    } catch {
+      listError.textContent = window.KB_TEXT.networkError;
+      listError.classList.remove("d-none");
+    } finally {
+      apply.disabled = false;
+    }
+  }
+
+  function openCancel(item) {
+    pendingId = item.id;
+    assignedNote.classList.toggle("d-none", item.status !== "ASSIGNED");
+    cancelError.classList.add("d-none");
+    dialog.showModal();
+  }
+
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    page = 1;
+    load();
+  });
+  document.getElementById("filter-clear").addEventListener("click", () => {
+    form.reset();
+    page = 1;
+    load();
+  });
+  document.getElementById("page-prev").addEventListener("click", () => {
+    if (page > 1) {
+      page -= 1;
+      load();
+    }
+  });
+  document.getElementById("page-next").addEventListener("click", () => {
+    page += 1;
+    load();
+  });
+  document.getElementById("cancel-dismiss").addEventListener("click", () => dialog.close());
+  confirmButton.addEventListener("click", async () => {
+    confirmButton.disabled = true;
+    cancelError.classList.add("d-none");
+    try {
+      const result = await KB.post("/api/requests/" + pendingId + "/cancel", {});
+      if (result.ok) {
+        dialog.close();
+        load();
+      } else {
+        cancelError.textContent = result.data.message || window.KB_TEXT.genericError;
+        cancelError.classList.remove("d-none");
+      }
+    } catch {
+      cancelError.textContent = window.KB_TEXT.networkError;
+      cancelError.classList.remove("d-none");
+    } finally {
+      confirmButton.disabled = false;
+    }
+  });
+  load();
+</script>
 {% endblock %}

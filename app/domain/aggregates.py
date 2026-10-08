@@ -122,12 +122,43 @@ class HelpRequest(AggregateRoot):
     def __init__(self, aggregate_id: UUID | None = None) -> None:
         super().__init__(aggregate_id)
         self.status = ""
+        self.requester_id: UUID | None = None
         self.match_attempt = 0
         self.concurrency_type = "UNKNOWN"
         self.completed_attempts: set[int] = set()
-        self.requester_id: UUID | None = None
         self.proposals: list[ProposalState] = []
         self.assigned_volunteer_id: UUID | None = None
+
+    def submit(self, payload: Mapping[str, Any], now: datetime) -> None:
+        if self.version != 0:
+            raise DomainError("Help request already exists")
+        self._record(ev.HELP_REQUEST_CREATED, payload, now)
+
+    def restore_lifecycle(self, history: Sequence[DomainEvent]) -> None:
+        """Set ``status`` from the stream. Match attempts stay with the propose path."""
+        self.status = _lifecycle_status(history)
+
+    def apply_help_request_created(self, event: DomainEvent) -> None:
+        raw = event.payload.get("requester_id")
+        self.requester_id = UUID(str(raw)) if raw else None
+        self.status = "PENDING_REVIEW"
+        self.concurrency_type = str(event.payload.get("concurrency_type") or "UNKNOWN")
+        if event.payload.get("match_attempt") is not None:
+            self.match_attempt = int(event.payload["match_attempt"])
+
+    def apply_help_request_cancelled(self, _event: DomainEvent) -> None:
+        self.status = "CANCELLED"
+
+    def _record(self, event_type: str, payload: Mapping[str, Any], now: datetime) -> None:
+        event = DomainEvent(
+            aggregate_id=self.aggregate_id,
+            aggregate_type=self.aggregate_type,
+            event_type=event_type,
+            payload=dict(payload),
+            version=self.version + 1,
+            created_at=now,
+        )
+        self._apply_new(event)
 
     def already_proposed(self, match_attempt: int) -> bool:
         return match_attempt in self.completed_attempts
@@ -220,15 +251,15 @@ class HelpRequest(AggregateRoot):
             raise DomainError("Match can only be retriggered when matches were proposed or none were found")
         self._fold(self.raise_event("MatchRetriggered", {}))
 
-    def cancel(self, cancelled_by: UUID, reason: str) -> None:
+    def cancel(self, cancelled_by: UUID, reason: str, now: datetime | None = None) -> None:
         if self.status not in OPEN_REQUEST_STATUSES:
             raise DomainError("This request can no longer be cancelled")
-        self._fold(
-            self.raise_event(
-                "HelpRequestCancelled",
-                {"cancelled_by": str(cancelled_by), "reason": reason},
-            )
-        )
+        payload = {"cancelled_by": str(cancelled_by), "reason": reason}
+        if now is None:
+            self._fold(self.raise_event("HelpRequestCancelled", payload))
+            return
+        self._record(ev.HELP_REQUEST_CANCELLED, payload, now)
+        self._fold(self.uncommitted_events()[-1])
 
     def _fold(self, event: DomainEvent) -> None:
         payload = event.payload
@@ -310,6 +341,27 @@ def _supersede_open(proposals: list[ProposalState]) -> None:
     for proposal in proposals:
         if proposal.status == "PROPOSED":
             proposal.status = "SUPERSEDED"
+
+
+def _lifecycle_status(history: Sequence[DomainEvent]) -> str:
+    status = ""
+    for event in history:
+        kind = event.event_type
+        if kind == ev.HELP_REQUEST_CREATED:
+            status = "PENDING_REVIEW"
+        elif kind == ev.MATCHES_PROPOSED:
+            status = "MATCH_PROPOSED"
+        elif kind == ev.NO_MATCH_FOUND:
+            status = "NO_MATCH"
+        elif kind in ("MatchRetriggered", "AssignmentsRejected", "TaskReleased"):
+            status = "PENDING_REVIEW"
+        elif kind in ("AssignmentApproved", "AssignmentOverridden"):
+            status = "ASSIGNED"
+        elif kind == "TaskCompleted":
+            status = "COMPLETED"
+        elif kind == ev.HELP_REQUEST_CANCELLED:
+            status = "CANCELLED"
+    return status
 
 
 class VolunteerProfile(AggregateRoot):

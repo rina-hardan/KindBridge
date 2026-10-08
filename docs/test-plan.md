@@ -14,7 +14,8 @@ Stack: pytest + Flask test client + SQL Server test DB or LocalDB. Agent tests m
 ## Requests and matching
 
 - Hebrew and English names of the same city pass the geography check; Hebrew and English names of the same skill count as overlap.
-- Submit creates `HelpRequestCreated` and projection `PENDING_REVIEW`.
+- Submit creates `HelpRequestCreated` and projection `PENDING_REVIEW`. There is no update endpoint.
+- The owner's list defaults to open statuses. Cancel from `PENDING_REVIEW` sets `CANCELLED` and drops the row from that default list. Another requester canceling it receives 403.
 - Propose with three eligible volunteers writes K≤3 `PROPOSED` and status `MATCH_PROPOSED`.
 - Propose with empty pool → `NO_MATCH`.
 - Reject blacklists those volunteer ids; second propose must not include them.

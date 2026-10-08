@@ -1,15 +1,19 @@
-"""Role-scoped help-request search and the request detail read model."""
+"""Help-request reads: admin search, request detail, and the owner's own list."""
 
+import uuid
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from app.domain.aggregates import OPEN_REQUEST_STATUSES
-from app.repositories.request_read import REQUEST_STATUSES, URGENCIES, RequestReadRepository
-from app.security.encryption import FieldEncryptor
+from sqlalchemy import Engine
 
-PAGE_SIZE = 20
+from app.domain.aggregates import OPEN_REQUEST_STATUSES
+from app.domain.requests import OPEN_STATUSES, PAGE_SIZE, RequestListFilters
+from app.repositories.request_read import REQUEST_STATUSES, URGENCIES, RequestReadRepository
+from app.repositories.requests import HelpRequestRepository, as_date
+from app.repositories.users import UserRepository
+from app.security.encryption import FieldEncryptor
 
 
 @dataclass(frozen=True)
@@ -21,6 +25,20 @@ class RequestListItem:
     urgency: str
     status: str
     overdue: bool
+
+
+@dataclass(frozen=True)
+class OwnedRequestItem:
+    id: uuid.UUID
+    category: str
+    city: str
+    urgency: str
+    status: str
+    preferred_date: str | None
+    description: str
+    created_at: str
+    overdue: bool
+    can_cancel: bool
 
 
 @dataclass(frozen=True)
@@ -45,6 +63,20 @@ class RequestSearch:
     @property
     def has_next(self) -> bool:
         return self.page < self.page_count
+
+
+@dataclass(frozen=True)
+class RequestPage:
+    items: list[OwnedRequestItem]
+    page: int
+    page_size: int
+    total: int
+
+
+@dataclass(frozen=True)
+class RequesterDefaults:
+    city: str
+    address: str
 
 
 @dataclass(frozen=True)
@@ -189,6 +221,47 @@ class GetHelpRequestDetailsQuery:
         )
 
 
+class GetMyRequestsQuery:
+    def __init__(self, engine: Engine, requests: HelpRequestRepository) -> None:
+        self._engine = engine
+        self._requests = requests
+
+    def execute(self, requester_id: uuid.UUID, filters: RequestListFilters, today: date) -> RequestPage:
+        with self._engine.connect() as conn:
+            rows = self._requests.list_for_requester(conn, requester_id)
+        rows = self._requests.matching_city(rows, filters.city)
+        if filters.statuses is not None:
+            allowed = set(filters.statuses)
+            rows = [row for row in rows if row["status"] in allowed]
+        if filters.category is not None:
+            rows = [row for row in rows if row["category"] == filters.category]
+        if filters.urgency is not None:
+            rows = [row for row in rows if row["urgency"] == filters.urgency]
+        total = len(rows)
+        start = (filters.page - 1) * PAGE_SIZE
+        page_rows = rows[start : start + PAGE_SIZE]
+        return RequestPage(
+            items=[_owned_item(row, today) for row in page_rows],
+            page=filters.page,
+            page_size=PAGE_SIZE,
+            total=total,
+        )
+
+
+class GetRequesterDefaultsQuery:
+    def __init__(self, engine: Engine, users: UserRepository) -> None:
+        self._engine = engine
+        self._users = users
+
+    def execute(self, user_id: uuid.UUID) -> RequesterDefaults | None:
+        with self._engine.connect() as conn:
+            found = self._users.requester_defaults(conn, user_id)
+        if found is None:
+            return None
+        city, address = found
+        return RequesterDefaults(city=city or "", address=address or "")
+
+
 def _card(row) -> VolunteerCard:
     return VolunteerCard(
         assignment_id=str(row.assignment_id),
@@ -208,3 +281,25 @@ def _score_label(score: Decimal | None) -> str | None:
     if number == int(number):
         return str(int(number))
     return f"{number:.1f}"
+
+
+def _owned_item(row: dict, today: date) -> OwnedRequestItem:
+    preferred = as_date(row["preferred_date"])
+    status = str(row["status"])
+    created = row["created_at"]
+    if isinstance(created, datetime):
+        created_text = created.date().isoformat()
+    else:
+        created_text = str(created)[:10]
+    return OwnedRequestItem(
+        id=row["id"] if isinstance(row["id"], uuid.UUID) else uuid.UUID(str(row["id"])),
+        category=str(row["category"]),
+        city=str(row["city"]),
+        urgency=str(row["urgency"]),
+        status=status,
+        preferred_date=None if preferred is None else preferred.isoformat(),
+        description=str(row["description"]),
+        created_at=created_text,
+        overdue=preferred is not None and preferred < today and status in OPEN_STATUSES,
+        can_cancel=status in OPEN_STATUSES,
+    )

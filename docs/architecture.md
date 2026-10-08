@@ -169,11 +169,25 @@ All mutating routes: CSRF + JWT. Prefix `/`.
 | GET | `/me/volunteer` | non-admin | volunteer enrollment view; redirects to `/me/tasks` when a volunteer profile exists |
 | POST | `/api/me/volunteer` | non-admin | `EnableVolunteerProfileCommand` |
 | GET | `/dashboard` | ADMIN | `GetAdminDashboardQuery` |
-| GET | `/me/requests` | non-admin with a requester profile | holding page until `GetMyRequestsQuery`; otherwise redirect to `/me/requester` |
+| GET | `/me/requests` | non-admin with a requester profile | own-ticket table; otherwise redirect to `/me/requester` |
+| GET | `/me/requests/new` | non-admin with a requester profile | create-request form; otherwise redirect to `/me/requester` |
+| GET | `/api/me/requests` | REQUESTER | `GetMyRequestsQuery` (status, category, urgency, city; status defaults to open) |
 | GET | `/requests` | scoped | `SearchHelpRequestsQuery` |
 | GET | `/requests/<id>` | scoped | `GetHelpRequestDetailsQuery` |
-| POST | `/api/requests` | REQUESTER | `SubmitHelpRequestCommand` |
+| POST | `/api/requests` | REQUESTER with a requester profile | `SubmitHelpRequestCommand` |
 | POST | `/api/requests/<id>/cancel` | owner/ADMIN | `CancelRequestCommand` |
+
+There is no request-update route. Replacing a ticket means cancel, then submit a new one.
+
+### 3.1 Help-request vocabulary
+
+`category` is a closed list: `errands`, `transport`, `shopping`, `companionship`, `home_help`, `childcare`, `tutoring`, `translation`, `first_aid`.
+
+`resource_type`: `PHYSICAL_PRESENCE`, `EQUIPMENT_LOAN`, `FLEXIBLE_REMOTE`.
+
+`urgency`: `LOW`, `NORMAL`, `HIGH`, `EMERGENCY`.
+
+`required_skills` uses the same Hebrew/English skill vocabulary as volunteer résumés (`app/domain/bilingual.py`). Values are stored as that vocabulary's canonical key.
 | POST | `/api/requests/<id>/approve` | ADMIN | `ApproveAssignmentCommand` |
 | POST | `/api/requests/<id>/reject` | ADMIN | `RejectAssignmentCommand` |
 | POST | `/api/requests/<id>/override` | ADMIN | `OverrideAssignmentCommand` |

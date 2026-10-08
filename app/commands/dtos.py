@@ -1,11 +1,13 @@
 import re
 from dataclasses import dataclass
+from datetime import date, time
 from typing import Any
 from uuid import UUID
 
 from app.commands.bus import Command
-from app.domain.bilingual import split_skills
+from app.domain.bilingual import skill_key, split_skills
 from app.domain.errors import ValidationError
+from app.domain.requests import CATEGORIES, RESOURCE_TYPES, URGENCIES
 from app.security.passwords import password_problem
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -137,6 +139,85 @@ class EnableVolunteerProfileCommand(Command):
 
 
 @dataclass(frozen=True)
+class SubmitHelpRequestCommand(Command):
+    requester_id: UUID
+    city: str
+    address: str
+    category: str
+    resource_type: str
+    description: str
+    urgency: str
+    preferred_date: str | None
+    preferred_time_from: str | None
+    preferred_time_to: str | None
+    estimated_duration_min: int | None
+    required_skills: tuple[str, ...]
+    requires_vehicle: bool
+
+    @classmethod
+    def from_payload(cls, requester_id: UUID, data: Any) -> "SubmitHelpRequestCommand":
+        if not isinstance(data, dict):
+            raise ValidationError({"body": "Expected a JSON object"})
+        errors: dict[str, str] = {}
+        city = _text(data, "city", errors, max_len=100)
+        address = _text(data, "address", errors, max_len=255)
+        category = _choice(data, "category", CATEGORIES, errors)
+        resource_type = _choice(data, "resource_type", RESOURCE_TYPES, errors)
+        description = _text(data, "description", errors, max_len=4000)
+        urgency = _choice(data, "urgency", URGENCIES, errors)
+        preferred_date = _optional_date(data, errors)
+        time_from, time_to = _optional_window(data, errors)
+        duration = _optional_duration(data, errors)
+        skills = _required_skills(data, errors)
+        requires_vehicle = data.get("requires_vehicle", False)
+        if not isinstance(requires_vehicle, bool):
+            errors["requires_vehicle"] = "Must be true or false"
+            requires_vehicle = False
+        if errors:
+            raise ValidationError(errors)
+        return cls(
+            requester_id=requester_id,
+            city=city,
+            address=address,
+            category=category,
+            resource_type=resource_type,
+            description=description,
+            urgency=urgency,
+            preferred_date=preferred_date,
+            preferred_time_from=time_from,
+            preferred_time_to=time_to,
+            estimated_duration_min=duration,
+            required_skills=skills,
+            requires_vehicle=requires_vehicle,
+        )
+
+
+@dataclass(frozen=True)
+class CancelRequestCommand(Command):
+    request_id: UUID
+    actor_id: UUID
+    is_admin: bool
+    reason: str
+
+    @classmethod
+    def from_payload(cls, request_id: UUID, actor_id: UUID, is_admin: bool, data: Any) -> "CancelRequestCommand":
+        if data is None:
+            data = {}
+        if not isinstance(data, dict):
+            raise ValidationError({"body": "Expected a JSON object"})
+        raw = data.get("reason")
+        if raw is None or raw == "":
+            reason = "Withdrawn by the requester"
+        elif not isinstance(raw, str):
+            raise ValidationError({"reason": "Must be text"})
+        else:
+            reason = raw.strip() or "Withdrawn by the requester"
+            if len(reason) > 500:
+                raise ValidationError({"reason": "Must be at most 500 characters"})
+        return cls(request_id=request_id, actor_id=actor_id, is_admin=is_admin, reason=reason)
+
+
+@dataclass(frozen=True)
 class LoginCommand(Command):
     email: str
     password: str
@@ -175,6 +256,89 @@ class BootstrapAdminCommand(Command):
         if errors:
             raise ValidationError(errors)
         return cls(email=email, password=password, full_name=full_name, phone=phone)
+
+
+def _choice(data: dict, field: str, allowed: tuple[str, ...], errors: dict[str, str]) -> str:
+    raw = data.get(field)
+    if raw not in allowed:
+        errors[field] = f"Must be one of {', '.join(allowed)}"
+        return allowed[0]
+    return raw
+
+
+def _optional_date(data: dict, errors: dict[str, str]) -> str | None:
+    raw = data.get("preferred_date")
+    if raw is None or raw == "":
+        return None
+    if not isinstance(raw, str):
+        errors["preferred_date"] = "Enter a valid date"
+        return None
+    try:
+        return date.fromisoformat(raw).isoformat()
+    except ValueError:
+        errors["preferred_date"] = "Enter a valid date"
+        return None
+
+
+def _optional_window(data: dict, errors: dict[str, str]) -> tuple[str | None, str | None]:
+    start = _optional_clock(data, "preferred_time_from", errors)
+    end = _optional_clock(data, "preferred_time_to", errors)
+    if (start is None) != (end is None) and "preferred_time_from" not in errors and "preferred_time_to" not in errors:
+        errors["preferred_time_to"] = "Enter both a start and an end time"
+        return None, None
+    if start and end and start >= end:
+        errors["preferred_time_to"] = "End time must be after the start time"
+        return None, None
+    return start, end
+
+
+def _optional_clock(data: dict, field: str, errors: dict[str, str]) -> str | None:
+    raw = data.get(field)
+    if raw is None or raw == "":
+        return None
+    if not isinstance(raw, str):
+        errors[field] = "Enter a valid time"
+        return None
+    text = raw.strip()
+    if len(text) == 5:
+        text += ":00"
+    try:
+        return time.fromisoformat(text).isoformat()
+    except ValueError:
+        errors[field] = "Enter a valid time"
+        return None
+
+
+def _optional_duration(data: dict, errors: dict[str, str]) -> int | None:
+    raw = data.get("estimated_duration_min")
+    if raw is None or raw == "":
+        return None
+    if isinstance(raw, bool) or not isinstance(raw, int) or not 1 <= raw <= 1440:
+        errors["estimated_duration_min"] = "Must be a whole number between 1 and 1440"
+        return None
+    return raw
+
+
+def _required_skills(data: dict, errors: dict[str, str]) -> tuple[str, ...]:
+    raw = data.get("required_skills", [])
+    if raw is None:
+        return ()
+    if isinstance(raw, str):
+        raw = split_skills(raw)
+    if not isinstance(raw, list):
+        errors["required_skills"] = "Skills must be a list of non-empty strings"
+        return ()
+    parts: list[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            errors["required_skills"] = "Skills must be a list of non-empty strings"
+            return ()
+        parts.extend(split_skills(item))
+    skills = tuple(dict.fromkeys(key for part in parts if (key := skill_key(part))))
+    if len(skills) > 30 or any(len(skill) > 50 for skill in skills):
+        errors["required_skills"] = "At most 30 skills, each up to 50 characters"
+        return ()
+    return skills
 
 
 def normalize_email(email: str) -> str:

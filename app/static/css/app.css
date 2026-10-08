@@ -108,3 +108,21 @@ dialog {
 dialog::backdrop {
   background: rgba(20, 30, 30, 0.45);
 }
+
+.kb-clip {
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kb-dialog {
+  border: 0;
+  border-radius: 0.5rem;
+  max-width: 28rem;
+  padding: 1.5rem;
+}
+
+.kb-dialog::backdrop {
+  background: rgba(15, 23, 32, 0.45);
+}

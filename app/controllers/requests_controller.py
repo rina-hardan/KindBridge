@@ -1,22 +1,24 @@
-"""Help-request list, detail, and the assignment actions on a request."""
+"""Help-request list, detail, submit, and the assignment actions on a request."""
 
-from datetime import date
+from datetime import date, datetime, timezone
 from uuid import UUID
 
 from flask import Blueprint, current_app, jsonify, redirect, render_template, request, url_for
 
+from app.commands.dtos import CancelRequestCommand, SubmitHelpRequestCommand
 from app.commands.exemption_commands import CreateExemptionLinkCommand
 from app.commands.request_commands import (
     ApproveAssignmentCommand,
-    CancelRequestCommand,
     OverrideAssignmentCommand,
     RejectAssignmentCommand,
     RetriggerMatchCommand,
 )
-from app.queries.request_queries import GetHelpRequestDetailsQuery, SearchHelpRequestsQuery
+from app.domain.requests import parse_list_filters
+from app.queries.request_queries import GetHelpRequestDetailsQuery, GetMyRequestsQuery, SearchHelpRequestsQuery
 from app.queries.volunteer_queries import GetVolunteerDirectoryQuery
 from app.repositories.matching import SqlMatchingReader
 from app.repositories.request_read import RequestReadRepository
+from app.repositories.requests import HelpRequestRepository
 from app.security.auth import current_identity, require_auth
 
 requests_bp = Blueprint("requests", __name__)
@@ -39,6 +41,10 @@ def _viewer():
     if identity is None:
         return None, redirect(url_for("auth.login_page"))
     return identity, None
+
+
+def _today():
+    return datetime.now(timezone.utc).date()
 
 
 @requests_bp.get("/requests")
@@ -79,6 +85,43 @@ def detail_page(request_id: UUID):
             request_id, today=date.today()
         )
     return render_template("requests/detail.html", details=details, directory=directory, is_admin=is_admin)
+
+
+@requests_bp.get("/api/me/requests")
+@require_auth("REQUESTER")
+def my_requests():
+    identity = current_identity()
+    filters = parse_list_filters(request.args.to_dict(flat=True))
+    page = GetMyRequestsQuery(_services().engine, HelpRequestRepository()).execute(identity.user_id, filters, _today())
+    return jsonify(
+        items=[
+            {
+                "id": str(item.id),
+                "category": item.category,
+                "city": item.city,
+                "urgency": item.urgency,
+                "status": item.status,
+                "preferred_date": item.preferred_date,
+                "description": item.description,
+                "created_at": item.created_at,
+                "overdue": item.overdue,
+                "can_cancel": item.can_cancel,
+            }
+            for item in page.items
+        ],
+        page=page.page,
+        page_size=page.page_size,
+        total=page.total,
+    )
+
+
+@requests_bp.post("/api/requests")
+@require_auth("REQUESTER")
+def submit_request():
+    identity = current_identity()
+    command = SubmitHelpRequestCommand.from_payload(identity.user_id, request.get_json(silent=True))
+    result = _services().bus.dispatch(command)
+    return jsonify(id=str(result.request_id)), 201
 
 
 @requests_bp.post("/api/requests/<uuid:request_id>/approve")

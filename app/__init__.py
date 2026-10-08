@@ -97,6 +97,7 @@ def build_services(
         event_store=event_store,
         reader=SqlMatchingReader(),
         projector=MatchProjector(),
+        users=UserRepository(),
         clock=clock,
     ).register_on(bus)
     ExemptionCommandHandlers(engine=engine, event_store=event_store, projector=ExemptionProjector()).register_on(bus)
