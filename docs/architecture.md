@@ -154,6 +154,7 @@ All mutating routes: CSRF + JWT. Prefix `/`.
 
 | Method | Path | Role | Command/Query |
 | :--- | :--- | :--- | :--- |
+| GET | `/` | anon | redirect to `/login`; authenticated users go to `/me` |
 | GET | `/login` | anon | view |
 | GET | `/register` | anon | view |
 | POST | `/api/auth/register` | anon | `RegisterUserCommand` |
@@ -166,7 +167,7 @@ All mutating routes: CSRF + JWT. Prefix `/`.
 | POST | `/api/me/account` | any authenticated | `UpdateAccountDetailsCommand` (email cannot change) |
 | GET | `/me/requester` | non-admin | requester enrollment view; redirects to `/me/requests` when a requester profile exists |
 | POST | `/api/me/requester` | non-admin | `UpdateRequesterProfileCommand` |
-| GET | `/me/volunteer` | non-admin | volunteer enrollment view; redirects to `/me/tasks` when a volunteer profile exists |
+| GET | `/me/volunteer` | non-admin | add-volunteering form, also used to update availability. Vehicle, free text, frequency, and unavailability periods. No city field |
 | POST | `/api/me/volunteer` | non-admin | `EnableVolunteerProfileCommand` |
 | GET | `/dashboard` | ADMIN | `GetAdminDashboardQuery` |
 | GET | `/me/requests` | non-admin with a requester profile | own-ticket table; otherwise redirect to `/me/requester` |
@@ -192,11 +193,16 @@ There is no request-update route. Replacing a ticket means cancel, then submit a
 | POST | `/api/requests/<id>/reject` | ADMIN | `RejectAssignmentCommand` |
 | POST | `/api/requests/<id>/override` | ADMIN | `OverrideAssignmentCommand` |
 | POST | `/api/requests/<id>/retrigger` | ADMIN | `RetriggerMatchCommand` |
-| GET | `/me/tasks` | non-admin with a volunteer profile | `GetVolunteerTasksQuery`: the caller's own `ASSIGNED` and `COMPLETED` tasks (filter `status`, `page`); otherwise redirect to `/me/volunteer` |
+| GET | `/me/tasks` | non-admin | Volunteer area. Opens with or without a volunteer profile. `GetVolunteerTasksQuery` for the caller's own `ASSIGNED` and `COMPLETED` tasks (filter `status`, `page`) in the "took on" column. `GetMyProfilesQuery` fills the "want to do" column. Header always links to `/me/volunteer` ("Add new volunteering"). Assigned rows offer Complete and Release |
 | GET | `/api/me/tasks` | VOLUNTEER | same query as JSON. Address and phone are returned only for `ASSIGNED` tasks, otherwise `null` |
+| GET | `/me/profile` | non-admin | redirects to `/me/volunteer` |
+| GET | `/api/me/profile` | VOLUNTEER | `GetMyProfilesQuery` as JSON, including open unavailability periods |
 | POST | `/api/assignments/<id>/complete` | assigned volunteer | `CompleteTaskCommand` |
 | POST | `/api/assignments/<id>/release` | assigned volunteer | `ReleaseTaskCommand` |
 | POST | `/api/profile` | VOLUNTEER | `UpdateVolunteerProfileCommand` (includes the `INACTIVE` toggle) |
+| POST | `/api/me/skills` | VOLUNTEER | `UpdateVolunteerSkillsCommand`. Replaces the skill list and leaves the other résumé fields as they are. At least one skill is required |
+| POST | `/api/me/unavailability` | VOLUNTEER | `AddVolunteerUnavailabilityCommand` |
+| POST | `/api/me/unavailability/<id>/cancel` | VOLUNTEER | `CancelVolunteerUnavailabilityCommand` |
 | POST | `/api/exemptions` | ADMIN or volunteer | `CreateExemptionLinkCommand` |
 
 There is no `SetVolunteerAvailabilityCommand`. `INACTIVE` is a field of `UpdateVolunteerProfileCommand`. Date ranges use `AddVolunteerUnavailabilityCommand` and `CancelVolunteerUnavailabilityCommand` (system-spec section 5).

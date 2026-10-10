@@ -126,3 +126,169 @@ dialog::backdrop {
 .kb-dialog::backdrop {
   background: rgba(15, 23, 32, 0.45);
 }
+
+.kb-offers {
+  position: sticky;
+  top: 1.25rem;
+  background: #fff;
+  border: 1px solid #d7e6e6;
+  border-radius: 1rem;
+  box-shadow: 0 12px 32px rgba(15, 70, 70, 0.07);
+  overflow: hidden;
+}
+
+.kb-offers-accent {
+  height: 0.25rem;
+  background: var(--kb-accent);
+}
+
+.kb-offers-head {
+  padding: 1.15rem 1.15rem 0.25rem;
+}
+
+.kb-offers-kicker {
+  margin: 0;
+  color: var(--kb-accent);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+[dir="ltr"] .kb-offers-kicker {
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.kb-offers-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0.15rem 0 0.35rem;
+  font-size: 1.2rem;
+}
+
+.kb-offers-count {
+  min-width: 1.75rem;
+  height: 1.75rem;
+  padding-inline: 0.45rem;
+  border-radius: 999px;
+  background: #e7f4f4;
+  color: var(--kb-accent);
+  display: inline-grid;
+  place-items: center;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.kb-offers-lead {
+  margin: 0;
+  color: #5c6f6f;
+  font-size: 0.875rem;
+}
+
+.kb-offer-list {
+  list-style: none;
+  margin: 0.9rem 0 0;
+  padding: 0 0.75rem;
+}
+
+.kb-offer {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+  padding: 0.7rem 0.75rem;
+  border-radius: 0.85rem;
+  background: #f4fafa;
+}
+
+.kb-offer-mark {
+  inline-size: 2.25rem;
+  block-size: 2.25rem;
+  border-radius: 0.7rem;
+  background: #fff;
+  color: var(--kb-accent);
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+  flex: none;
+  box-shadow: inset 0 0 0 1px #d5e8e8;
+}
+
+.kb-offer-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.kb-offer-name {
+  display: block;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.kb-offer-actions {
+  display: flex;
+  gap: 0.25rem;
+  flex: none;
+}
+
+.kb-offer.is-editing {
+  flex-wrap: wrap;
+  background: #fff;
+  box-shadow: inset 0 0 0 1px #b7d6d6;
+}
+
+.kb-offer.is-editing .kb-offer-actions {
+  flex-basis: 100%;
+  justify-content: flex-end;
+}
+
+.kb-icon-btn {
+  width: 2rem;
+  height: 2rem;
+  border: 0;
+  border-radius: 0.6rem;
+  background: #fff;
+  color: #3d5c5c;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+}
+
+.kb-icon-btn:hover,
+.kb-icon-btn:focus-visible {
+  background: #e7f4f4;
+  color: var(--kb-accent);
+}
+
+.kb-icon-btn-danger:hover,
+.kb-icon-btn-danger:focus-visible {
+  background: #f8ecec;
+  color: #8a2424;
+}
+
+.kb-icon-btn:disabled {
+  opacity: 0.35;
+}
+
+.kb-offers-note,
+.kb-offers-empty {
+  margin: 0.25rem 1.15rem 0.85rem;
+  color: #5c6f6f;
+  font-size: 0.85rem;
+}
+
+.kb-offer-add {
+  padding: 0.9rem 1.15rem 1.15rem;
+  margin-top: 0.35rem;
+  border-top: 1px solid #e6f0f0;
+}
+
+.kb-offer-add-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.kb-offer-add-row .btn {
+  flex: none;
+}

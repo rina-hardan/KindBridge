@@ -23,8 +23,8 @@ class VolunteerProfileInput:
     skills: tuple[str, ...]
     experience: str
     base_frequency: str
-    max_active_tasks: int
-    max_parallel_tasks: int
+    max_active_tasks: int | None
+    max_parallel_tasks: int | None
 
 
 @dataclass(frozen=True)
@@ -136,6 +136,80 @@ class EnableVolunteerProfileCommand(Command):
             raise ValidationError(errors)
         assert profile is not None
         return cls(user_id=user_id, profile=profile)
+
+
+AVAILABILITY_STATUSES = ("AVAILABLE", "INACTIVE")
+
+
+@dataclass(frozen=True)
+class UpdateVolunteerSkillsCommand(Command):
+    """Replace the skill list. The handler keeps every other résumé field."""
+
+    user_id: UUID
+    skills: tuple[str, ...]
+
+    @classmethod
+    def from_payload(cls, user_id: UUID, data: Any) -> "UpdateVolunteerSkillsCommand":
+        if not isinstance(data, dict):
+            raise ValidationError({"body": "Expected a JSON object"})
+        errors: dict[str, str] = {}
+        skills = _skills(data.get("skills", []), errors)
+        if errors:
+            raise ValidationError(errors)
+        return cls(user_id=user_id, skills=skills)
+
+
+@dataclass(frozen=True)
+class UpdateVolunteerProfileCommand(Command):
+    user_id: UUID
+    profile: VolunteerProfileInput
+    availability_status: str | None
+
+    @classmethod
+    def from_payload(cls, user_id: UUID, data: Any) -> "UpdateVolunteerProfileCommand":
+        if not isinstance(data, dict):
+            raise ValidationError({"body": "Expected a JSON object"})
+        errors: dict[str, str] = {}
+        profile = _volunteer_profile(data, errors, prefix="")
+        status = data.get("availability_status", None)
+        if status is None:
+            pass
+        elif status not in AVAILABILITY_STATUSES:
+            errors["availability_status"] = f"Must be one of {', '.join(AVAILABILITY_STATUSES)}"
+            status = None
+        if errors:
+            raise ValidationError(errors)
+        assert profile is not None
+        return cls(user_id=user_id, profile=profile, availability_status=status)
+
+
+@dataclass(frozen=True)
+class AddVolunteerUnavailabilityCommand(Command):
+    user_id: UUID
+    from_date: str
+    until_date: str
+    reason: str | None
+
+    @classmethod
+    def from_payload(cls, user_id: UUID, data: Any) -> "AddVolunteerUnavailabilityCommand":
+        if not isinstance(data, dict):
+            raise ValidationError({"body": "Expected a JSON object"})
+        errors: dict[str, str] = {}
+        from_date = _named_date(data, "from_date", errors)
+        until_date = _named_date(data, "until_date", errors)
+        reason = _optional_text(data, "reason", errors, max_len=200)
+        if from_date and until_date and until_date < from_date and "until_date" not in errors:
+            errors["until_date"] = "End date must be on or after the start date"
+        if errors:
+            raise ValidationError(errors)
+        assert from_date is not None and until_date is not None
+        return cls(user_id=user_id, from_date=from_date, until_date=until_date, reason=reason)
+
+
+@dataclass(frozen=True)
+class CancelVolunteerUnavailabilityCommand(Command):
+    user_id: UUID
+    unavailability_id: UUID
 
 
 @dataclass(frozen=True)
@@ -267,16 +341,22 @@ def _choice(data: dict, field: str, allowed: tuple[str, ...], errors: dict[str, 
 
 
 def _optional_date(data: dict, errors: dict[str, str]) -> str | None:
-    raw = data.get("preferred_date")
+    return _named_date(data, "preferred_date", errors, required=False)
+
+
+def _named_date(data: dict, field: str, errors: dict[str, str], *, required: bool = True) -> str | None:
+    raw = data.get(field)
     if raw is None or raw == "":
+        if required:
+            errors[field] = "Enter a valid date"
         return None
     if not isinstance(raw, str):
-        errors["preferred_date"] = "Enter a valid date"
+        errors[field] = "Enter a valid date"
         return None
     try:
         return date.fromisoformat(raw).isoformat()
     except ValueError:
-        errors["preferred_date"] = "Enter a valid date"
+        errors[field] = "Enter a valid date"
         return None
 
 
@@ -421,31 +501,44 @@ def _int_in_range(raw: Any, field: str, default: int, low: int, high: int, error
     return raw
 
 
+def _skills(raw: Any, errors: dict[str, str], field: str = "skills") -> tuple[str, ...]:
+    parts: list[str] = []
+    if not isinstance(raw, list):
+        errors[field] = "Skills must be a list of non-empty strings"
+        return ()
+    for item in raw:
+        if not isinstance(item, str):
+            errors[field] = "Skills must be a list of non-empty strings"
+            return ()
+        parts.extend(split_skills(item))
+    if field not in errors and not parts:
+        errors[field] = "Skills must be a list of non-empty strings"
+        return ()
+    skills = tuple(dict.fromkeys(part.casefold() for part in parts))
+    if field not in errors and (len(skills) > 30 or any(len(skill) > 50 for skill in skills)):
+        errors[field] = "At most 30 skills, each up to 50 characters"
+        return ()
+    return skills
+
+
 def _volunteer_profile(raw: Any, errors: dict[str, str], prefix: str = "volunteer_profile.") -> VolunteerProfileInput | None:
     if not isinstance(raw, dict):
         errors["volunteer_profile"] = "Expected an object"
         return None
 
     local: dict[str, str] = {}
-    city = _text(raw, "primary_city", local, max_len=100)
+    raw_city = raw.get("primary_city")
+    if raw_city is None or (isinstance(raw_city, str) and not raw_city.strip()):
+        city = ""
+    else:
+        city = _text(raw, "primary_city", local, max_len=100)
     experience = _text(raw, "experience", local, max_len=10000)
 
-    skills_raw = raw.get("skills", [])
-    parts: list[str] = []
-    if not isinstance(skills_raw, list):
-        local["skills"] = "Skills must be a list of non-empty strings"
+    raw_skills = raw.get("skills", None)
+    if raw_skills is None or raw_skills == []:
+        skills: tuple[str, ...] = ()
     else:
-        for item in skills_raw:
-            if not isinstance(item, str):
-                local["skills"] = "Skills must be a list of non-empty strings"
-                parts = []
-                break
-            parts.extend(split_skills(item))
-        if "skills" not in local and not parts:
-            local["skills"] = "Skills must be a list of non-empty strings"
-    skills = tuple(dict.fromkeys(part.casefold() for part in parts))
-    if "skills" not in local and (len(skills) > 30 or any(len(s) > 50 for s in skills)):
-        local["skills"] = "At most 30 skills, each up to 50 characters"
+        skills = _skills(raw_skills, local)
 
     has_vehicle = raw.get("has_vehicle", False)
     if not isinstance(has_vehicle, bool):
@@ -456,8 +549,16 @@ def _volunteer_profile(raw: Any, errors: dict[str, str], prefix: str = "voluntee
     if frequency not in BASE_FREQUENCIES:
         local["base_frequency"] = f"Must be one of {', '.join(BASE_FREQUENCIES)}"
 
-    max_active = _int_in_range(raw.get("max_active_tasks"), "max_active_tasks", 1, 1, 10, local)
-    max_parallel = _int_in_range(raw.get("max_parallel_tasks"), "max_parallel_tasks", 2, 0, 10, local)
+    max_active = (
+        None
+        if "max_active_tasks" not in raw or raw.get("max_active_tasks") is None
+        else _int_in_range(raw.get("max_active_tasks"), "max_active_tasks", 1, 1, 10, local)
+    )
+    max_parallel = (
+        None
+        if "max_parallel_tasks" not in raw or raw.get("max_parallel_tasks") is None
+        else _int_in_range(raw.get("max_parallel_tasks"), "max_parallel_tasks", 2, 0, 10, local)
+    )
 
     errors.update({prefix + k: v for k, v in local.items()})
     if local:

@@ -18,7 +18,7 @@ from app.controllers.admin_controller import admin_bp
 from app.controllers.auth_controller import auth_bp
 from app.controllers.requests_controller import requests_bp
 from app.controllers.errors import register_error_handlers
-from app.i18n import current_lang, localize, translate
+from app.i18n import current_lang, localize, skill_label, translate
 from app.infrastructure.llm import chat_from_settings
 from app.infrastructure.notification_service import (
     NoNotifications,
@@ -205,6 +205,7 @@ def _install_text_direction(app: Flask) -> None:
             "text_dir": "rtl" if lang == "he" else "ltr",
             "identity": current_identity(),
             "t": translate,
+            "skill_label": skill_label,
             "kb_text": {
                 "genericError": translate("js.generic_error"),
                 "networkError": translate("js.network_error"),

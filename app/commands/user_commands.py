@@ -4,7 +4,7 @@ import math
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Callable
 
 from sqlalchemy import Engine
@@ -12,24 +12,32 @@ from sqlalchemy.exc import IntegrityError
 
 from app.commands.bus import CommandBus
 from app.commands.dtos import (
+    AddVolunteerUnavailabilityCommand,
     BootstrapAdminCommand,
+    CancelVolunteerUnavailabilityCommand,
     EnableVolunteerProfileCommand,
     LoginCommand,
     RegisterUserCommand,
     UpdateAccountDetailsCommand,
     UpdateRequesterProfileCommand,
+    UpdateVolunteerProfileCommand,
+    UpdateVolunteerSkillsCommand,
 )
 from app.domain.aggregates import UserAggregate
 from app.domain.events import (
     REQUESTER_PROFILE_UPDATED,
     USER_DETAILS_UPDATED,
     VOLUNTEER_PROFILE_ENABLED,
+    VOLUNTEER_PROFILE_UPDATED,
+    VOLUNTEER_UNAVAILABILITY_ADDED,
+    VOLUNTEER_UNAVAILABILITY_CANCELLED,
     DomainEvent,
 )
 from app.domain.errors import (
     AccountLocked,
     AdminAlreadyExists,
     ConcurrencyConflict,
+    DomainError,
     EmailAlreadyRegistered,
     Forbidden,
     InvalidCredentials,
@@ -120,6 +128,10 @@ class UserCommandHandlers:
         bus.register(UpdateAccountDetailsCommand, self.update_account)
         bus.register(UpdateRequesterProfileCommand, self.update_requester_profile)
         bus.register(EnableVolunteerProfileCommand, self.enable_volunteer)
+        bus.register(UpdateVolunteerProfileCommand, self.update_volunteer_profile)
+        bus.register(UpdateVolunteerSkillsCommand, self.update_volunteer_skills)
+        bus.register(AddVolunteerUnavailabilityCommand, self.add_unavailability)
+        bus.register(CancelVolunteerUnavailabilityCommand, self.cancel_unavailability)
 
     def register_user(self, cmd: RegisterUserCommand) -> RegisterResult:
         now = self._clock()
@@ -240,25 +252,132 @@ class UserCommandHandlers:
         now = self._clock()
         profile_id = uuid.uuid4()
         vp = cmd.profile
-        payload = {
-            "profile_id": str(profile_id),
-            "primary_city": vp.primary_city,
-            "has_vehicle": vp.has_vehicle,
-            "skills": list(vp.skills),
-            "experience": vp.experience,
-            "base_frequency": vp.base_frequency,
-            "max_active_tasks": vp.max_active_tasks,
-            "max_parallel_tasks": vp.max_parallel_tasks,
-        }
         with self._engine.begin() as conn:
             account = self._require_account(conn, cmd.user_id)
             if account.is_admin:
                 raise Forbidden("An admin account cannot volunteer")
+            city = vp.primary_city or (account.city or "").strip()
+            if not city:
+                raise ValidationError({"primary_city": "A residence city is required"})
+            payload = {
+                "profile_id": str(profile_id),
+                "primary_city": city,
+                "has_vehicle": vp.has_vehicle,
+                "skills": list(vp.skills),
+                "experience": vp.experience,
+                "base_frequency": vp.base_frequency,
+                "max_active_tasks": 1 if vp.max_active_tasks is None else vp.max_active_tasks,
+                "max_parallel_tasks": 2 if vp.max_parallel_tasks is None else vp.max_parallel_tasks,
+            }
             if self._users.volunteer_profile_id(conn, cmd.user_id) is not None:
                 raise ProfileAlreadyEnabled("This account is already registered as a volunteer")
             event = self._append_to_user(conn, cmd.user_id, VOLUNTEER_PROFILE_ENABLED, payload, now)
         self._index_enabled_profiles([event])
         return EnableVolunteerResult(profile_id=profile_id, roles=derive_roles(False, True))
+
+    def update_volunteer_profile(self, cmd: UpdateVolunteerProfileCommand) -> None:
+        now = self._clock()
+        vp = cmd.profile
+        with self._engine.begin() as conn:
+            account = self._require_account(conn, cmd.user_id)
+            if account.is_admin:
+                raise Forbidden("An admin account cannot volunteer")
+            existing = self._users.volunteer_profile(conn, cmd.user_id)
+            if existing is None:
+                raise Forbidden("Register as a volunteer before editing the profile")
+            status = existing.availability_status if cmd.availability_status is None else cmd.availability_status
+            if status == "INACTIVE" and self._users.assigned_task_dates(conn, existing.profile_id):
+                raise ConcurrencyConflict("Release assigned tasks before marking yourself inactive")
+            payload = {
+                "profile_id": str(existing.profile_id),
+                "primary_city": vp.primary_city or existing.primary_city,
+                "has_vehicle": vp.has_vehicle,
+                "skills": list(vp.skills),
+                "experience": vp.experience,
+                "base_frequency": vp.base_frequency,
+                "availability_status": status,
+                "max_active_tasks": existing.max_active_tasks if vp.max_active_tasks is None else vp.max_active_tasks,
+                "max_parallel_tasks": existing.max_parallel_tasks
+                if vp.max_parallel_tasks is None
+                else vp.max_parallel_tasks,
+            }
+            event = self._append_to_user(conn, cmd.user_id, VOLUNTEER_PROFILE_UPDATED, payload, now)
+        self._sync_resume(event)
+
+    def update_volunteer_skills(self, cmd: UpdateVolunteerSkillsCommand) -> None:
+        now = self._clock()
+        with self._engine.begin() as conn:
+            account = self._require_account(conn, cmd.user_id)
+            if account.is_admin:
+                raise Forbidden("An admin account cannot volunteer")
+            existing = self._users.volunteer_profile(conn, cmd.user_id)
+            if existing is None:
+                raise Forbidden("Register as a volunteer before editing the profile")
+            payload = {
+                "profile_id": str(existing.profile_id),
+                "primary_city": existing.primary_city,
+                "has_vehicle": existing.has_vehicle,
+                "skills": list(cmd.skills),
+                "experience": existing.experience,
+                "base_frequency": existing.base_frequency,
+                "availability_status": existing.availability_status,
+                "max_active_tasks": existing.max_active_tasks,
+                "max_parallel_tasks": existing.max_parallel_tasks,
+            }
+            event = self._append_to_user(conn, cmd.user_id, VOLUNTEER_PROFILE_UPDATED, payload, now)
+        self._sync_resume(event)
+
+    def add_unavailability(self, cmd: AddVolunteerUnavailabilityCommand) -> uuid.UUID:
+        now = self._clock()
+        period_id = uuid.uuid4()
+        start = date.fromisoformat(cmd.from_date)
+        end = date.fromisoformat(cmd.until_date)
+        with self._engine.begin() as conn:
+            account = self._require_account(conn, cmd.user_id)
+            if account.is_admin:
+                raise Forbidden("An admin account cannot volunteer")
+            profile_id = self._users.volunteer_profile_id(conn, cmd.user_id)
+            if profile_id is None:
+                raise Forbidden("Register as a volunteer before editing the profile")
+            today = now.date()
+            for task_date in self._users.assigned_task_dates(conn, profile_id):
+                covered = today if task_date is None else task_date
+                if start <= covered <= end:
+                    raise ConcurrencyConflict("This period covers an assigned task. Release that task first")
+            self._append_to_user(
+                conn,
+                cmd.user_id,
+                VOLUNTEER_UNAVAILABILITY_ADDED,
+                {
+                    "unavailability_id": str(period_id),
+                    "volunteer_id": str(profile_id),
+                    "from_date": cmd.from_date,
+                    "until_date": cmd.until_date,
+                    "reason": cmd.reason,
+                },
+                now,
+            )
+        return period_id
+
+    def cancel_unavailability(self, cmd: CancelVolunteerUnavailabilityCommand) -> None:
+        now = self._clock()
+        with self._engine.begin() as conn:
+            self._require_account(conn, cmd.user_id)
+            profile_id = self._users.volunteer_profile_id(conn, cmd.user_id)
+            if profile_id is None:
+                raise Forbidden("Register as a volunteer before editing the profile")
+            period = self._users.unavailability_period(conn, cmd.unavailability_id)
+            if period is None or period.volunteer_id != profile_id:
+                raise NotFound("Unavailability period was not found")
+            if period.is_cancelled:
+                raise DomainError("This period is already cancelled")
+            self._append_to_user(
+                conn,
+                cmd.user_id,
+                VOLUNTEER_UNAVAILABILITY_CANCELLED,
+                {"unavailability_id": str(cmd.unavailability_id)},
+                now,
+            )
 
     def _require_account(self, conn, user_id: uuid.UUID):
         account = self._users.get_account(conn, user_id)
@@ -274,6 +393,37 @@ class UserCommandHandlers:
         self._event_store.append_in(conn, user_id, version, [event])
         self._projector.apply([event], conn)
         return event
+
+    def _sync_resume(self, event: DomainEvent) -> None:
+        """Post-commit. INACTIVE deletes the vector; any other status upserts it."""
+        payload = event.payload
+        profile_id = str(payload["profile_id"])
+        if payload.get("availability_status") == "INACTIVE":
+            self._with_resume_retry(lambda: self._resumes.delete_resume(profile_id))
+            return
+        skills_json = json.dumps(list(payload["skills"]), ensure_ascii=False)
+        self._with_resume_retry(
+            lambda: self._resumes.upsert_resume(
+                profile_id=profile_id,
+                user_id=str(event.aggregate_id),
+                experience=str(payload["experience"]),
+                skills_json=skills_json,
+                primary_city=str(payload["primary_city"]),
+                has_vehicle=bool(payload["has_vehicle"]),
+            )
+        )
+
+    def _with_resume_retry(self, action: Callable[[], None]) -> None:
+        attempts = len(self._resume_retry_delays) + 1
+        for attempt in range(attempts):
+            if attempt:
+                self._sleep(self._resume_retry_delays[attempt - 1])
+            try:
+                action()
+                return
+            except Exception:
+                if attempt == attempts - 1:
+                    logger.exception("vector_store_unavailable")
 
     def _index_enabled_profiles(self, events: list[DomainEvent]) -> None:
         """Post-commit side effect. A Chroma failure must not roll back the registration."""

@@ -27,6 +27,13 @@ def _session_response(user_id, roles, *, status: int = 200, rotate_csrf: bool = 
     return response
 
 
+@auth_bp.get("/")
+def home():
+    if current_identity() is not None:
+        return redirect(url_for("account.profile_page"))
+    return redirect(url_for("auth.login_page"))
+
+
 @auth_bp.get("/login")
 def login_page():
     if current_identity() is not None:

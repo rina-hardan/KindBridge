@@ -1,15 +1,21 @@
 from datetime import date
+from uuid import UUID
 
 from flask import Blueprint, current_app, jsonify, redirect, render_template, request, url_for
 
 from app.commands.dtos import (
+    AddVolunteerUnavailabilityCommand,
+    CancelVolunteerUnavailabilityCommand,
     EnableVolunteerProfileCommand,
     UpdateAccountDetailsCommand,
     UpdateRequesterProfileCommand,
+    UpdateVolunteerProfileCommand,
+    UpdateVolunteerSkillsCommand,
 )
+from app.commands.request_commands import CompleteTaskCommand, ReleaseTaskCommand
 from app.domain.requests import ALL_STATUSES, CATEGORIES, RESOURCE_TYPES, URGENCIES
 from app.i18n import localize
-from app.queries.account_queries import AccountView, GetMyAccountQuery
+from app.queries.account_queries import AccountView, GetMyAccountQuery, GetMyProfilesQuery
 from app.queries.request_queries import GetRequesterDefaultsQuery
 from app.queries.volunteer_queries import GetVolunteerTasksQuery
 from app.repositories.users import UserRepository
@@ -122,9 +128,16 @@ def volunteer_join_page():
     admin = _redirect_admin(account)
     if admin is not None:
         return admin
-    if account.has_volunteer_profile:
-        return redirect(url_for("account.tasks_page"))
-    return render_template("account/volunteer_join.html", account=account)
+    profile = _profiles_query().execute(account.user_id, today=date.today())
+    notice = request.args.get("period_error", "")
+    if len(notice) > 300:
+        notice = notice[:300]
+    return render_template(
+        "account/volunteer_join.html",
+        account=account,
+        profile=profile,
+        period_error=notice,
+    )
 
 
 @account_bp.post("/api/me/volunteer")
@@ -193,15 +206,18 @@ def tasks_page():
     admin = _redirect_admin(account)
     if admin is not None:
         return admin
-    if not account.has_volunteer_profile:
-        return redirect(url_for("account.volunteer_join_page"))
     found = _tasks_query().execute(
         account.user_id,
         status=request.args.get("status", ""),
         page=_page_arg(),
         today=date.today(),
     )
-    return render_template("account/tasks_home.html", tasks=found)
+    profile = _profiles_query().execute(account.user_id, today=date.today())
+    return render_template(
+        "account/tasks_home.html",
+        tasks=found,
+        profile=profile,
+    )
 
 
 @account_bp.get("/api/me/tasks")
@@ -236,3 +252,101 @@ def my_tasks():
         page_size=found.page_size,
         total=found.total,
     )
+
+
+def _profiles_query() -> GetMyProfilesQuery:
+    return GetMyProfilesQuery(_services().engine, UserRepository())
+
+
+@account_bp.get("/me/profile")
+def volunteer_profile_page():
+    account, bounce = _account_or_login()
+    if bounce is not None:
+        return bounce
+    admin = _redirect_admin(account)
+    if admin is not None:
+        return admin
+    return redirect(url_for("account.volunteer_join_page"))
+
+
+@account_bp.get("/api/me/profile")
+@require_auth("VOLUNTEER")
+def volunteer_profile_api():
+    identity = current_identity()
+    profile = _profiles_query().execute(identity.user_id, today=date.today())
+    if profile is None:
+        return jsonify(error="not_found", message=localize("Volunteer profile was not found")), 404
+    return jsonify(
+        profile_id=profile.profile_id,
+        primary_city=profile.primary_city,
+        has_vehicle=profile.has_vehicle,
+        skills=profile.skills_text,
+        experience=profile.experience,
+        base_frequency=profile.base_frequency,
+        availability_status=profile.availability_status,
+        display_availability=profile.display_availability,
+        max_active_tasks=profile.max_active_tasks,
+        max_parallel_tasks=profile.max_parallel_tasks,
+        periods=[
+            {
+                "id": item.period_id,
+                "from_date": item.from_date,
+                "until_date": item.until_date,
+                "reason": item.reason,
+            }
+            for item in profile.periods
+        ],
+    )
+
+
+@account_bp.post("/api/me/skills")
+@require_auth("VOLUNTEER")
+def update_volunteer_skills():
+    identity = current_identity()
+    command = UpdateVolunteerSkillsCommand.from_payload(identity.user_id, request.get_json(silent=True))
+    _services().bus.dispatch(command)
+    return jsonify(ok=True)
+
+
+@account_bp.post("/api/profile")
+@require_auth("VOLUNTEER")
+def update_volunteer_profile():
+    identity = current_identity()
+    command = UpdateVolunteerProfileCommand.from_payload(identity.user_id, request.get_json(silent=True))
+    _services().bus.dispatch(command)
+    return jsonify(ok=True)
+
+
+@account_bp.post("/api/me/unavailability")
+@require_auth("VOLUNTEER")
+def add_unavailability():
+    identity = current_identity()
+    command = AddVolunteerUnavailabilityCommand.from_payload(identity.user_id, request.get_json(silent=True))
+    period_id = _services().bus.dispatch(command)
+    return jsonify(unavailability_id=str(period_id)), 201
+
+
+@account_bp.post("/api/me/unavailability/<uuid:period_id>/cancel")
+@require_auth("VOLUNTEER")
+def cancel_unavailability(period_id: UUID):
+    identity = current_identity()
+    command = CancelVolunteerUnavailabilityCommand(user_id=identity.user_id, unavailability_id=period_id)
+    _services().bus.dispatch(command)
+    return jsonify(ok=True)
+
+
+@account_bp.post("/api/assignments/<uuid:assignment_id>/complete")
+@require_auth("VOLUNTEER")
+def complete_task(assignment_id: UUID):
+    identity = current_identity()
+    _services().bus.dispatch(CompleteTaskCommand(assignment_id=assignment_id, actor_id=identity.user_id))
+    return jsonify(ok=True)
+
+
+@account_bp.post("/api/assignments/<uuid:assignment_id>/release")
+@require_auth("VOLUNTEER")
+def release_task(assignment_id: UUID):
+    identity = current_identity()
+    command = ReleaseTaskCommand.from_payload(assignment_id, identity.user_id, request.get_json(silent=True))
+    _services().bus.dispatch(command)
+    return jsonify(ok=True)

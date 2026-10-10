@@ -423,6 +423,22 @@ def test_bootstrap_admin_writes_admin_event(app, engine):
 # --- Views ----------------------------------------------------------------------------------
 
 
+def test_root_opens_the_login_page(client):
+    response = client.get("/")
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/login")
+
+
+def test_root_opens_the_account_for_a_signed_in_person(client):
+    register(client, REQUESTER)
+
+    response = client.get("/")
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/me")
+
+
 @pytest.mark.parametrize("path", ["/login", "/register"])
 def test_auth_pages_render(client, path):
     response = client.get(path)

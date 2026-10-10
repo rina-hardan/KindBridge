@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import Engine
+from sqlalchemy import Engine, select
 
 from app.commands.bus import Command, CommandBus
 from app.commands.dtos import CancelRequestCommand, SubmitHelpRequestCommand
@@ -17,6 +17,7 @@ from app.infrastructure.notification_service import NoNotifications, Notificatio
 from app.projections.match_projector import MatchProjector
 from app.repositories.event_store import SqlEventStore
 from app.repositories.matching import SqlMatchingReader
+from app.repositories.tables import task_assignments
 from app.repositories.users import UserRepository
 
 logger = logging.getLogger(__name__)
@@ -72,6 +73,35 @@ class OverrideAssignmentCommand(Command):
 
 
 @dataclass(frozen=True)
+class CompleteTaskCommand(Command):
+    assignment_id: UUID
+    actor_id: UUID
+
+
+@dataclass(frozen=True)
+class ReleaseTaskCommand(Command):
+    assignment_id: UUID
+    actor_id: UUID
+    reason: str
+
+    @classmethod
+    def from_payload(cls, assignment_id: UUID, actor_id: UUID, data: Any) -> "ReleaseTaskCommand":
+        if data is None:
+            data = {}
+        body = _object(data)
+        raw = body.get("reason")
+        if raw is None or raw == "":
+            reason = "Released by the volunteer"
+        elif not isinstance(raw, str):
+            raise ValidationError({"reason": "Must be text"})
+        else:
+            reason = raw.strip() or "Released by the volunteer"
+            if len(reason) > 500:
+                raise ValidationError({"reason": "Must be at most 500 characters"})
+        return cls(assignment_id=assignment_id, actor_id=actor_id, reason=reason)
+
+
+@dataclass(frozen=True)
 class RetriggerMatchCommand(Command):
     request_id: UUID
     actor_id: UUID
@@ -114,6 +144,8 @@ class RequestCommandHandlers:
         bus.register(OverrideAssignmentCommand, self.override)
         bus.register(RetriggerMatchCommand, self.retrigger)
         bus.register(CancelRequestCommand, self.cancel)
+        bus.register(CompleteTaskCommand, self.complete)
+        bus.register(ReleaseTaskCommand, self.release)
 
     def submit(self, cmd: SubmitHelpRequestCommand) -> SubmitHelpRequestResult:
         now = self._clock()
@@ -188,6 +220,35 @@ class RequestCommandHandlers:
         self._commit(request)
         if volunteer_to_notify is not None:
             self._notifications.cancelled_while_assigned(request.aggregate_id, volunteer_to_notify)
+
+    def complete(self, command: CompleteTaskCommand) -> None:
+        request, _profile_id = self._assigned_to_actor(command.assignment_id, command.actor_id)
+        request.complete(command.assignment_id)
+        self._commit(request)
+
+    def release(self, command: ReleaseTaskCommand) -> None:
+        request, profile_id = self._assigned_to_actor(command.assignment_id, command.actor_id)
+        request.release(command.assignment_id, command.reason)
+        self._commit(request)
+        self._notifications.task_released(request.aggregate_id, profile_id, command.reason)
+
+    def _assigned_to_actor(self, assignment_id: UUID, actor_id: UUID) -> tuple[HelpRequest, UUID]:
+        with self._engine.connect() as conn:
+            row = conn.execute(
+                select(
+                    task_assignments.c.request_id,
+                    task_assignments.c.volunteer_id,
+                ).where(task_assignments.c.id == assignment_id)
+            ).first()
+            profile_id = None if row is None else self._users.volunteer_profile_id(conn, actor_id)
+        if row is None:
+            raise NotFound("Assignment was not found")
+        if profile_id is None or row.volunteer_id != profile_id:
+            raise Forbidden("Your role cannot perform this action")
+        request = self._load(row.request_id)
+        if request.status != "ASSIGNED" or request.assigned_assignment_id != assignment_id:
+            raise DomainError("This task is not assigned")
+        return request, profile_id
 
     def _load(self, request_id: UUID) -> HelpRequest:
         history = self._event_store.load_stream(request_id)

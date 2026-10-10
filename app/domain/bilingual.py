@@ -122,3 +122,8 @@ def skill_key(value: str) -> str:
     if not folded:
         return ""
     return _SKILLS.get(folded, folded)
+
+
+def known_skill_keys() -> tuple[str, ...]:
+    """Canonical skill keys, in vocabulary order. Used to suggest offers on the tasks page."""
+    return tuple(dict.fromkeys(_SKILLS.values()))

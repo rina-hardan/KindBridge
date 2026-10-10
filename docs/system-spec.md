@@ -20,7 +20,7 @@ KindBridge coordinates citizen assistance requests, volunteer capacity, and AI-a
   - `REQUESTER` for every non-admin user.
   - `VOLUNTEER` for a non-admin user with an enabled `volunteer_profiles` row.
   - A person may therefore hold `REQUESTER` and `VOLUNTEER` together.
-- **[CHANGED] Enrollment is not registration.** Public registration writes only the person (`users`). From the account page, "ask for help" saves a `requester_profiles` row and then opens the help-request area; "volunteer" saves a `volunteer_profiles` row and then opens the volunteer area. Until that row exists, the entry shows the enrollment form instead of the area. The `REQUESTER` role is still derived for every non-admin user.
+- **[CHANGED] Enrollment is not registration.** Public registration writes only the person (`users`). From the account page, "ask for help" saves a `requester_profiles` row and then opens the help-request area. "Volunteer" opens the volunteer area immediately, even when it is empty. There is no enrollment form in front of it. That screen lists volunteering already taken on, and on the side the volunteering the person wants to do. From the header, "add new volunteering" saves a `volunteer_profiles` row: `primary_city` is copied from the residence city, `has_vehicle` is a checkbox used only when a request requires a vehicle, `experience` is one free-text field (domain, traits, past experience, or anything else), and `base_frequency` is how often they can help. The same screen holds unavailability date ranges. "Add new volunteering" opens that screen again, and the form title becomes "Update availability" once a profile exists. Capacity fields are not shown and stay at their defaults. Until the profile exists, the person is not matched. The `REQUESTER` role is still derived for every non-admin user.
 - **[NEW] Self-assignment is forbidden:** a volunteer can never be proposed, approved, or overridden onto a request they created (`volunteer_profiles.user_id = help_requests.requester_id`). Enforced by one shared function (`is_self_assignment`) called from the agent filter, `ApproveAssignmentCommand`, and `OverrideAssignmentCommand`.
 - Relational dialect: **Microsoft SQL Server** on Somee.com. Vector store is **ChromaDB**, not pgvector.
 - Application server: **Flask**, organized as CQRS/MVC (see [architecture.md](architecture.md)).
@@ -112,17 +112,17 @@ Optional 1:1 extension. Holds data that repeats across a person's requests, so t
 
 ### 3.3 `volunteer_profiles` [CHANGED]
 
-`experience` + `skills_json` are the **resume document** embedded into ChromaDB (NFR 6). Re-embed on every successful `UpdateVolunteerProfileCommand` and on enable.
+`experience` is the résumé embedded into ChromaDB (NFR 6), with `skills_json` appended when it is not empty. Re-embed on every successful `UpdateVolunteerProfileCommand` and on enable. The volunteering form does not collect skill categories.
 
 | Field | Type | Constraints | Description |
 | :--- | :--- | :--- | :--- |
 | `id` | UNIQUEIDENTIFIER | PK | Profile id |
 | `user_id` | UNIQUEIDENTIFIER | UNIQUE, FK users, NOT NULL | 1:1 with the user |
 | `is_enabled` | BIT | NOT NULL, default 1 | **[NEW]** Volunteer role switch. Disabling keeps all data |
-| `primary_city` | NVARCHAR(100) | Indexed, NOT NULL | Home municipality |
-| `has_vehicle` | BIT | NOT NULL, default 0 | Transport available |
-| `skills_json` | NVARCHAR(MAX) | NOT NULL | JSON string array |
-| `experience` | NVARCHAR(MAX) | NOT NULL | Resume narrative (free-text or extracted from optional uploaded file) | 
+| `primary_city` | NVARCHAR(100) | Indexed, NOT NULL | Home municipality. Copied from `users.city` when add-volunteering omits it. The form does not ask again |
+| `has_vehicle` | BIT | NOT NULL, default 0 | Transport available. A checkbox on add-volunteering. The agent uses it only when the request has `requires_vehicle = 1`. It is not asked on each task |
+| `skills_json` | NVARCHAR(MAX) | NOT NULL | JSON string array. May be `[]`. The volunteering form does not edit this list |
+| `experience` | NVARCHAR(MAX) | NOT NULL | One free-text field: domain, traits, past experience, or anything else the volunteer writes | 
 | `base_frequency` | NVARCHAR(30) | NOT NULL | `WEEKLY`, `BIWEEKLY`, `MONTHLY`, `ON_DEMAND` (one-off / as needed). **Soft** score bonus, never a hard filter |
 | `availability_status` | NVARCHAR(30) | NOT NULL, default `AVAILABLE` | Stored values: `AVAILABLE`, `INACTIVE`. See availability rules |
 | `max_active_tasks` | INT | NOT NULL, default 1 | **[CHANGED]** Cap for `EXCLUSIVE` tasks |
@@ -377,7 +377,7 @@ Only volunteers who passed 4.2 are ranked. Inputs: semantic similarity between t
 `SetVolunteerAvailabilityCommand` from v1.0 is replaced by the INACTIVE toggle inside `UpdateVolunteerProfileCommand` plus the two unavailability commands.
 
 **Queries:**
-`GetAdminDashboardQuery`, `SearchHelpRequestsQuery` (role-scoped filters: category, city, urgency, status), `GetHelpRequestDetailsQuery`, `GetVolunteerTasksQuery`, `GetMyRequestsQuery` (owner's tickets; same filters, default status group is the open statuses), `GetMyProfilesQuery` [NEW] (requester + volunteer profiles and unavailability), `GetVolunteerDirectoryQuery` (admin), `GetAssignmentCandidatesQuery`.
+`GetAdminDashboardQuery`, `SearchHelpRequestsQuery` (role-scoped filters: category, city, urgency, status), `GetHelpRequestDetailsQuery`, `GetVolunteerTasksQuery`, `GetMyRequestsQuery` (owner's tickets; same filters, default status group is the open statuses), `GetMyProfilesQuery` [NEW] (the caller's volunteer profile and open unavailability periods), `GetVolunteerDirectoryQuery` (admin), `GetAssignmentCandidatesQuery`.
 
 `GetVolunteerOffersQuery` (admin) reads enabled volunteer profiles of active users on `GET /admin/volunteers`. A profile is assigned when it has a `task_assignments` row in `ASSIGNED` (the screen links that request and shows its category and city) and unassigned otherwise; `page` and `assignment` (`all`, `assigned`, `unassigned`) only filter the read. Phone and address are not shown.
 
@@ -387,7 +387,7 @@ Only volunteers who passed 4.2 are ranked. Inputs: semantic similarity between t
 
 ## 6. User workflows (course 4.1-4.5)
 
-1. **Data entry:** register with name, email, phone, password, residence city, and home address only. From the account page the person saves a requester profile before the help-request area, and a volunteer profile before the volunteer area. A requester then creates a ticket. A ticket is not edited; the owner cancels it and submits a new one. A volunteer maintains résumé fields and unavailability periods. Names, cities, addresses, skills, and experience may be entered in Hebrew or English and are stored as written. On SQL Server those columns are bound as NVARCHAR so Hebrew is kept.
+1. **Data entry:** register with name, email, phone, password, residence city, and home address only. From the account page the person saves a requester profile before the help-request area. The volunteer area opens without a profile, with an empty taken-on list and an empty want-to-do column. "Add new volunteering" on that area saves the vehicle checkbox, one free-text narrative, frequency, and optional unavailability dates; the city is the residence city. Opening that form again updates the same profile. A requester then creates a ticket. A ticket is not edited; the owner cancels it and submits a new one. Names, cities, addresses, and the narrative may be entered in Hebrew or English and are stored as written. On SQL Server those columns are bound as NVARCHAR so Hebrew is kept.
 2. **Search:** filters on category, city, urgency, status (requester: own rows; admin: all; volunteer: assigned tasks).
 3. **Table:** queues, candidates per ticket, history.
 4. **Detail:** narrative, scoped location, AI score breakdown for each of the K candidates, concurrency type, exclusion summary when `NO_MATCH`.

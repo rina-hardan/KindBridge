@@ -6,7 +6,7 @@ Stack: pytest + Flask test client + SQL Server test DB or LocalDB. Agent tests m
 
 ## Auth
 
-- Register a person with residence city and home address only; reject volunteer fields, a missing residence, a duplicate email, and admin self-register. Admin seed leaves `city` and `home_address` null. The account page updates name, phone, city, and home address, and refuses an email change. Requester and volunteer profiles are saved from the account entries.
+- Register a person with residence city and home address only; reject volunteer fields, a missing residence, a duplicate email, and admin self-register. Admin seed leaves `city` and `home_address` null. The account page updates name, phone, city, and home address, and refuses an email change. The requester profile is saved from the account entry. The volunteer area opens without a profile. Add volunteering copies the residence city, stores one free-text narrative, a vehicle flag, and a frequency, and does not require a skill list.
 - Login sets HttpOnly cookie; bad password 401; lockout after 5 failures.
 - Requester cannot GET another requester’s detail (403).
 - Volunteer cannot POST `/api/requests/<id>/approve` (403).
@@ -23,6 +23,9 @@ Stack: pytest + Flask test client + SQL Server test DB or LocalDB. Agent tests m
 - Second concurrent approve → 409.
 - Override requires reason; without reason 400.
 - Retrigger supersedes open proposals and returns to `PENDING_REVIEW`; those volunteers stay eligible (SUPERSEDED is not a blacklist).
+- The assigned volunteer completes a task: request `COMPLETED`, assignment `COMPLETED`, capacity decremented. Release returns the request to `PENDING_REVIEW`, marks that assignment `DECLINED`, frees capacity, and notifies the requester. Another person receives 403; a missing login receives 401.
+- A volunteer edits their profile after joining. Saving `INACTIVE`, or adding an unavailability period that covers an assigned task's date, returns 409 until the task is released. Cancelling a period keeps the row with `is_cancelled = 1`.
+- The tasks page opens without a volunteer profile. Its header is "Add new volunteering", the taken-on list can be empty, and the want-to-do column is empty until a profile exists. After a profile exists that column shows the narrative, and the page does not list skills. `POST /api/me/skills` still replaces the skill list, keeps the other résumé fields, and rejects an empty list. A missing login is 401; a requester is 403.
 
 ## Capacity and calendar
 

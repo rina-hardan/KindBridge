@@ -93,7 +93,7 @@ class NotificationService:
         self._submit("cancelled", lambda: self._cancelled(request_id, volunteer_profile_id))
 
     def task_released(self, request_id: UUID, volunteer_profile_id: UUID, reason: str | None) -> None:
-        """TaskReleased: the requester and the admin(s). No command emits it yet."""
+        """TaskReleased: the requester and the admin(s). Called by ReleaseTaskCommand after commit."""
         self._submit("task_released", lambda: self._task_released(request_id, volunteer_profile_id, reason))
 
     def match_outcome(self, request_id: UUID, event_type: str, payload: dict[str, Any]) -> None:

@@ -127,26 +127,85 @@ def test_requester_entry_saves_profile_then_opens_requests(client, engine):
     assert "התנדבות".encode() in page.data
 
 
-def test_volunteer_entry_saves_profile_then_opens_tasks(client, engine):
+def test_volunteer_area_opens_before_a_profile_exists(client, engine):
     register(client, VOLUNTEER)
     login(client, VOLUNTEER["email"], VOLUNTEER["password"])
 
-    assert client.get("/me/tasks").headers["Location"].endswith("/me/volunteer")
-    form = client.get("/me/volunteer")
-    assert "רישום כמתנדב".encode() in form.data
-    assert "אפשר בעברית או באנגלית".encode() in form.data
-    assert b'value="Haifa"' in form.data
+    tasks = client.get("/me/tasks")
+    assert tasks.status_code == 200
+    body = tasks.data.decode()
+    assert "הוספת התנדבות חדשה" in body
+    assert "התנדבויות שלקחת על עצמך" in body
+    assert "ההתנדבויות שאתה רוצה לעשות" in body
+    assert "עדיין אין כאן כלום" in body
+    assert "רישום כמתנדב" not in body
+    assert "תחום ההתנדבות" not in body
 
-    response = enable_volunteer(client)
+    form = client.get("/me/volunteer")
+    assert form.status_code == 200
+    text = form.data.decode()
+    assert "הוספת התנדבות" in text
+    assert "תחום ההתנדבות" in text
+    assert "יש רכב" in text
+    assert "באיזו תדירות" in text
+    assert "תאריכים שבהם אי אפשר לעזור" in text
+    assert "אם לא רוצים לציין תאריכים מראש" in text
+    assert "עיר שבה אפשר לעזור" not in text
+
+    response = enable_volunteer(
+        client,
+        {
+            "has_vehicle": True,
+            "experience": "עזרה לקשישים, סבלנות, וניסיון קודם בליווי",
+            "base_frequency": "WEEKLY",
+        },
+    )
 
     assert response.status_code == 201
     with engine.connect() as conn:
         profile = conn.execute(select(volunteer_profiles)).one()
     assert profile.primary_city == "Haifa"
-    assert json.loads(profile.skills_json) == ["first aid", "driving"]
-    assert client.get("/me/volunteer").headers["Location"].endswith("/me/tasks")
-    assert "עדיין אין לך התנדבויות".encode() in client.get("/me/tasks").data
+    assert profile.has_vehicle is True or profile.has_vehicle == 1
+    assert json.loads(profile.skills_json) == []
+    assert profile.experience == "עזרה לקשישים, סבלנות, וניסיון קודם בליווי"
+    assert profile.base_frequency == "WEEKLY"
+    assert profile.max_active_tasks == 1
+    assert profile.max_parallel_tasks == 2
+    again = client.get("/me/tasks")
+    assert again.status_code == 200
+    assert "הוספת התנדבות חדשה".encode() in again.data
+    assert "התנדבויות שלקחת על עצמך".encode() in again.data
+    assert "ההתנדבויות שאתה רוצה לעשות".encode() in again.data
+    assert "עזרה לקשישים".encode() in again.data
+    assert "מוכן לעשות".encode() not in again.data
     assert "ההתנדבות שלי".encode() in client.get("/me").data
+
+
+def test_volunteering_form_keeps_city_and_capacity(client, engine):
+    register(client, VOLUNTEER)
+    login(client, VOLUNTEER["email"], VOLUNTEER["password"])
+    enable_volunteer(client, dict(VOLUNTEER_PROFILE, max_active_tasks=3, max_parallel_tasks=0))
+
+    response = csrf_post(
+        client,
+        "/api/profile",
+        {
+            "has_vehicle": False,
+            "experience": "מלל חופשי חדש",
+            "base_frequency": "MONTHLY",
+        },
+    )
+
+    assert response.status_code == 200
+    with engine.connect() as conn:
+        profile = conn.execute(select(volunteer_profiles)).one()
+    assert profile.primary_city == "Haifa"
+    assert json.loads(profile.skills_json) == []
+    assert profile.experience == "מלל חופשי חדש"
+    assert profile.base_frequency == "MONTHLY"
+    assert profile.max_active_tasks == 3
+    assert profile.max_parallel_tasks == 0
+    assert profile.availability_status == "AVAILABLE"
 
 
 def test_volunteer_profile_keeps_hebrew_skills(client, engine):

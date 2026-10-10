@@ -1,12 +1,13 @@
 """A volunteer sees only their own ASSIGNED and COMPLETED tasks, on /me/tasks and /api/me/tasks."""
 
+import json
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
 
 from app.commands.dtos import BootstrapAdminCommand
-from app.repositories.tables import help_requests, task_assignments, volunteer_profiles
-from tests.conftest import REQUESTER, VOLUNTEER, VOLUNTEER_PROFILE
+from app.repositories.tables import event_store, help_requests, task_assignments, volunteer_profiles
+from tests.conftest import REQUESTER, VOLUNTEER, VOLUNTEER_PROFILE, csrf_post
 from tests.test_auth import bus, login, register
 from tests.test_requests import _append, _created_payload, _enable, _propose
 
@@ -242,3 +243,64 @@ def test_pagination_clamps_the_page(app, client):
     assert beyond["page"] == 2
     assert junk.status_code == 200
     assert junk.get_json()["page"] == 1
+
+
+def test_tasks_page_lists_the_help_the_volunteer_offers(client):
+    _volunteer(client)
+
+    page = client.get("/me/tasks")
+
+    assert page.status_code == 200
+    text = page.data.decode()
+    assert "הוספת התנדבות חדשה" in text
+    assert "התנדבויות שלקחת על עצמך" in text
+    assert "ההתנדבויות שאתה רוצה לעשות" in text
+    assert "Five years with Magen David Adom" in text
+    assert "מוכן לעשות" not in text
+    assert 'data-skill="first aid"' not in text
+
+
+def test_volunteer_can_revise_offered_skills(client, engine):
+    _volunteer(client)
+
+    response = csrf_post(client, "/api/me/skills", {"skills": ["בישול", "נהיגה"]})
+
+    assert response.status_code == 200
+    with engine.connect() as conn:
+        row = conn.execute(select(volunteer_profiles)).one()
+        event = conn.execute(
+            select(event_store.c.payload_json).where(event_store.c.event_type == "VolunteerProfileUpdated")
+        ).one()
+    assert json.loads(row.skills_json) == ["בישול", "נהיגה"]
+    assert row.primary_city == "Haifa"
+    assert row.experience == VOLUNTEER_PROFILE["experience"]
+    assert row.base_frequency == "WEEKLY"
+    payload = json.loads(event.payload_json)
+    assert payload["skills"] == ["בישול", "נהיגה"]
+    assert payload["availability_status"] == "AVAILABLE"
+    text = client.get("/me/tasks").data.decode()
+    assert "הוספת התנדבות חדשה" in text
+    assert "Five years with Magen David Adom" in text
+    assert 'data-skill="בישול"' not in text
+
+
+def test_skills_endpoint_rejects_an_empty_list(client, engine):
+    _volunteer(client)
+
+    response = csrf_post(client, "/api/me/skills", {"skills": []})
+
+    assert response.status_code == 400
+    with engine.connect() as conn:
+        row = conn.execute(select(volunteer_profiles)).one()
+    assert json.loads(row.skills_json) == ["first aid", "driving"]
+
+
+def test_skills_endpoint_requires_login_and_the_volunteer_role(app, client):
+    assert csrf_post(client, "/api/me/skills", {"skills": ["driving"]}).status_code == 401
+
+    register(client, REQUESTER)
+    assert csrf_post(client, "/api/me/skills", {"skills": ["driving"]}).status_code == 403
+
+    bus(app).dispatch(BootstrapAdminCommand.create("root@kindbridge.org", "admin-password-123", "Root"))
+    login(client, "root@kindbridge.org", "admin-password-123")
+    assert csrf_post(client, "/api/me/skills", {"skills": ["driving"]}).status_code == 403

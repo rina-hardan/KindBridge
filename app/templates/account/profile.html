@@ -56,7 +56,7 @@
           </p>
         </div>
         <div>
-          <a class="btn btn-outline-secondary w-100" href="{{ url_for('account.tasks_page') if account.has_volunteer_profile else url_for('account.volunteer_join_page') }}">
+          <a class="btn btn-outline-secondary w-100" href="{{ url_for('account.tasks_page') }}">
             {% if account.has_volunteer_profile %}{{ t("profile.my_tasks") }}{% else %}{{ t("profile.volunteer") }}{% endif %}
           </a>
           <p class="form-text mb-0 mt-2">

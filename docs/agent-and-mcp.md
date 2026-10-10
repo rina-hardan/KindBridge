@@ -159,7 +159,7 @@ class Notifier(Protocol):
 | `AssignmentApproved` | Flask | assigned volunteer and requester |
 | `AssignmentOverridden` | Flask | assigned volunteer and requester |
 | `HelpRequestCancelled`, only when the status was `ASSIGNED` | Flask | the assigned volunteer |
-| `TaskReleased` | Flask | requester and admin(s). The notifier method `task_released` exists; no `ReleaseTaskCommand` calls it yet |
+| `TaskReleased` | Flask | requester and admin(s), via `ReleaseTaskCommand` |
 | `MatchesProposed` | **agent** | admin(s): "New match proposal waiting for review" with request id, category, city, urgency, the top candidates (name and `ai_score`), and a link to `/requests/<id>` |
 | `NoMatchFound` | **agent** | admin(s): the same facts plus the `rejection_summary` |
 

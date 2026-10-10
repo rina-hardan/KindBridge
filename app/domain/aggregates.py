@@ -128,6 +128,7 @@ class HelpRequest(AggregateRoot):
         self.completed_attempts: set[int] = set()
         self.proposals: list[ProposalState] = []
         self.assigned_volunteer_id: UUID | None = None
+        self.assigned_assignment_id: UUID | None = None
 
     def submit(self, payload: Mapping[str, Any], now: datetime) -> None:
         if self.version != 0:
@@ -172,6 +173,7 @@ class HelpRequest(AggregateRoot):
         self.requester_id = None
         self.proposals = []
         self.assigned_volunteer_id = None
+        self.assigned_assignment_id = None
         for event in history:
             self._fold(event)
 
@@ -251,6 +253,25 @@ class HelpRequest(AggregateRoot):
             raise DomainError("Match can only be retriggered when matches were proposed or none were found")
         self._fold(self.raise_event("MatchRetriggered", {}))
 
+    def complete(self, assignment_id: UUID) -> None:
+        """The assigned volunteer finished the task. The request becomes terminal."""
+        self._require_assigned(assignment_id)
+        self._fold(self.raise_event("TaskCompleted", {"assignment_id": str(assignment_id)}))
+
+    def release(self, assignment_id: UUID, reason: str) -> None:
+        """The assigned volunteer cannot perform the task. It returns to review and they are declined on it."""
+        self._require_assigned(assignment_id)
+        self._fold(
+            self.raise_event(
+                "TaskReleased",
+                {"assignment_id": str(assignment_id), "reason": reason},
+            )
+        )
+
+    def _require_assigned(self, assignment_id: UUID) -> None:
+        if self.status != "ASSIGNED" or self.assigned_assignment_id != assignment_id:
+            raise DomainError("This task is not assigned")
+
     def cancel(self, cancelled_by: UUID, reason: str, now: datetime | None = None) -> None:
         if self.status not in OPEN_REQUEST_STATUSES:
             raise DomainError("This request can no longer be cancelled")
@@ -302,6 +323,7 @@ class HelpRequest(AggregateRoot):
             self.status = "ASSIGNED"
             chosen = UUID(str(payload["assignment_id"]))
             self.assigned_volunteer_id = UUID(str(payload["volunteer_id"]))
+            self.assigned_assignment_id = chosen
             for proposal in self.proposals:
                 if proposal.assignment_id == chosen:
                     proposal.status = "ASSIGNED"
@@ -311,12 +333,32 @@ class HelpRequest(AggregateRoot):
         if kind == "AssignmentOverridden":
             self.status = "ASSIGNED"
             self.assigned_volunteer_id = UUID(str(payload["volunteer_id"]))
+            self.assigned_assignment_id = UUID(str(payload["assignment_id"]))
             _supersede_open(self.proposals)
+            return
+        if kind == "TaskCompleted":
+            self.status = "COMPLETED"
+            finished = UUID(str(payload["assignment_id"]))
+            for proposal in self.proposals:
+                if proposal.assignment_id == finished:
+                    proposal.status = "COMPLETED"
+            self.assigned_volunteer_id = None
+            self.assigned_assignment_id = None
+            return
+        if kind == "TaskReleased":
+            self.status = "PENDING_REVIEW"
+            released = UUID(str(payload["assignment_id"]))
+            for proposal in self.proposals:
+                if proposal.assignment_id == released:
+                    proposal.status = "DECLINED"
+            self.assigned_volunteer_id = None
+            self.assigned_assignment_id = None
             return
         if kind == "HelpRequestCancelled":
             self.status = "CANCELLED"
             _supersede_open(self.proposals)
             self.assigned_volunteer_id = None
+            self.assigned_assignment_id = None
 
 
 def _proposals_from(payload: Mapping[str, Any]) -> list[ProposalState]:

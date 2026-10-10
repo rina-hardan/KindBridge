@@ -1,14 +1,14 @@
 import json
 import uuid
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 from sqlalchemy import Connection, insert, select, update
 
 from app.domain import events as ev
 from app.domain.events import DomainEvent
-from app.repositories.tables import requester_profiles, users, volunteer_profiles
+from app.repositories.tables import requester_profiles, users, volunteer_profiles, volunteer_unavailability
 
 
 def _naive_utc(value: datetime) -> datetime:
@@ -32,6 +32,9 @@ class UserProjector:
             ev.CREDENTIAL_SET: self._on_CredentialSet,
             ev.ADMIN_BOOTSTRAPPED: self._on_AdminBootstrapped,
             ev.VOLUNTEER_PROFILE_ENABLED: self._on_VolunteerProfileEnabled,
+            ev.VOLUNTEER_PROFILE_UPDATED: self._on_VolunteerProfileUpdated,
+            ev.VOLUNTEER_UNAVAILABILITY_ADDED: self._on_VolunteerUnavailabilityAdded,
+            ev.VOLUNTEER_UNAVAILABILITY_CANCELLED: self._on_VolunteerUnavailabilityCancelled,
             ev.REQUESTER_PROFILE_UPDATED: self._on_RequesterProfileUpdated,
         }
 
@@ -111,6 +114,44 @@ class UserProjector:
             )
         )
 
+    def _on_VolunteerProfileUpdated(self, conn: Connection, event: DomainEvent) -> None:
+        payload = event.payload
+        conn.execute(
+            update(volunteer_profiles)
+            .where(volunteer_profiles.c.id == uuid.UUID(payload["profile_id"]))
+            .values(
+                primary_city=payload["primary_city"],
+                has_vehicle=bool(payload["has_vehicle"]),
+                skills_json=json.dumps(payload["skills"], ensure_ascii=False),
+                experience=payload["experience"],
+                base_frequency=payload["base_frequency"],
+                availability_status=payload["availability_status"],
+                max_active_tasks=int(payload["max_active_tasks"]),
+                max_parallel_tasks=int(payload["max_parallel_tasks"]),
+            )
+        )
+
+    def _on_VolunteerUnavailabilityAdded(self, conn: Connection, event: DomainEvent) -> None:
+        payload = event.payload
+        conn.execute(
+            insert(volunteer_unavailability).values(
+                id=uuid.UUID(payload["unavailability_id"]),
+                volunteer_id=uuid.UUID(payload["volunteer_id"]),
+                from_date=_calendar_date(payload["from_date"]),
+                until_date=_calendar_date(payload["until_date"]),
+                reason=payload.get("reason"),
+                is_cancelled=False,
+                created_at=_naive_utc(event.created_at),
+            )
+        )
+
+    def _on_VolunteerUnavailabilityCancelled(self, conn: Connection, event: DomainEvent) -> None:
+        conn.execute(
+            update(volunteer_unavailability)
+            .where(volunteer_unavailability.c.id == uuid.UUID(event.payload["unavailability_id"]))
+            .values(is_cancelled=True)
+        )
+
     def _on_RequesterProfileUpdated(self, conn: Connection, event: DomainEvent) -> None:
         payload = event.payload
         values = {
@@ -136,3 +177,11 @@ class UserProjector:
         conn.execute(
             update(requester_profiles).where(requester_profiles.c.user_id == event.aggregate_id).values(**values)
         )
+
+
+def _calendar_date(value: Any) -> date:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    return date.fromisoformat(str(value)[:10])

@@ -1,68 +1,194 @@
 {% extends "base.html" %}
-{% block title %}{{ t("volunteer.title") }} · KindBridge{% endblock %}
+{% block title %}{{ t("volunteer.availability_title") if profile else t("volunteer.add_title") }} · KindBridge{% endblock %}
 {% block content %}
 <div class="row justify-content-center">
-  <div class="col-12 col-lg-7">
-    <div class="card border-0 shadow-sm">
+  <div class="col-12 col-lg-8">
+    <div class="card border-0 shadow-sm mb-4">
       <div class="card-body p-4">
-        <h1 class="h4 mb-1">{{ t("volunteer.title") }}</h1>
-        <p class="text-body-secondary small mb-4">{{ t("volunteer.lead") }}</p>
+        <h1 class="h4 mb-1">{{ t("volunteer.availability_title") if profile else t("volunteer.add_title") }}</h1>
+        <p class="text-body-secondary small mb-4">{{ t("volunteer.availability_lead") if profile else t("volunteer.lead") }}</p>
+        {% if period_error %}
+        <div class="alert alert-danger" role="alert">{{ period_error }}</div>
+        {% endif %}
+        <div id="form-success" class="alert alert-success d-none" role="status">{{ t("volunteer.saved") }}</div>
         <div id="form-error" class="alert alert-danger d-none" role="alert"></div>
         <form id="volunteer-form" novalidate>
           <div class="row g-3">
-            <div class="col-md-6">
-              <label for="primary_city" class="form-label">{{ t("volunteer.city") }}</label>
-              <input id="primary_city" name="primary_city" class="form-control" value="{{ account.city or '' }}" dir="auto" required aria-describedby="city-help">
-              <div id="city-help" class="form-text">{{ t("field.city_help") }}</div>
-              <div class="invalid-feedback" data-field="primary_city"></div>
+            <div class="col-12">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="has_vehicle" name="has_vehicle" {% if profile and profile.has_vehicle %}checked{% endif %}>
+                <label class="form-check-label" for="has_vehicle">{{ t("volunteer.vehicle") }}</label>
+              </div>
+              <div class="form-text">{{ t("volunteer.vehicle_help") }}</div>
+              <div class="invalid-feedback" data-field="has_vehicle"></div>
+            </div>
+            <div class="col-12">
+              <label for="experience" class="form-label">{{ t("volunteer.about") }}</label>
+              <textarea id="experience" name="experience" class="form-control" rows="5" dir="auto" required aria-describedby="about-help">{{ profile.experience if profile else "" }}</textarea>
+              <div id="about-help" class="form-text">{{ t("volunteer.about_help") }}</div>
+              <div class="invalid-feedback" data-field="experience"></div>
             </div>
             <div class="col-md-6">
               <label for="base_frequency" class="form-label">{{ t("volunteer.frequency") }}</label>
               <select id="base_frequency" name="base_frequency" class="form-select" required>
-                <option value="ON_DEMAND">{{ t("volunteer.on_demand") }}</option>
-                <option value="WEEKLY">{{ t("volunteer.weekly") }}</option>
-                <option value="BIWEEKLY">{{ t("volunteer.biweekly") }}</option>
-                <option value="MONTHLY">{{ t("volunteer.monthly") }}</option>
+                {% for value in ["ON_DEMAND", "WEEKLY", "BIWEEKLY", "MONTHLY"] %}
+                <option value="{{ value }}" {% if profile and value == profile.base_frequency %}selected{% endif %}>{{ t("volunteer." + value|lower) }}</option>
+                {% endfor %}
               </select>
               <div class="invalid-feedback" data-field="base_frequency"></div>
             </div>
+            {% if not profile %}
             <div class="col-12">
-              <label for="skills" class="form-label">{{ t("volunteer.skills") }}</label>
-              <input id="skills" name="skills" class="form-control" dir="auto" required aria-describedby="skills-help">
-              <div id="skills-help" class="form-text">{{ t("volunteer.skills_help") }}</div>
-              <div class="invalid-feedback" data-field="skills"></div>
+              <h2 class="h6 mb-1">{{ t("volunteer.away_title") }}</h2>
+              <p class="text-body-secondary small mb-1">{{ t("volunteer.away_optional") }}</p>
+              <p class="text-body-secondary small">{{ t("volunteer.away_lead") }}</p>
+            </div>
+            <div class="col-sm-6">
+              <label for="from_date" class="form-label">{{ t("volunteer.from_date") }}</label>
+              <input id="from_date" name="from_date" type="date" class="form-control">
+              <div class="invalid-feedback" data-field="from_date"></div>
+            </div>
+            <div class="col-sm-6">
+              <label for="until_date" class="form-label">{{ t("volunteer.until_date") }}</label>
+              <input id="until_date" name="until_date" type="date" class="form-control">
+              <div class="invalid-feedback" data-field="until_date"></div>
             </div>
             <div class="col-12">
-              <label for="experience" class="form-label">{{ t("volunteer.experience") }}</label>
-              <textarea id="experience" name="experience" class="form-control" rows="4" dir="auto" required></textarea>
-              <div class="invalid-feedback" data-field="experience"></div>
+              <label for="reason" class="form-label">{{ t("volunteer.reason") }}</label>
+              <input id="reason" name="reason" class="form-control" dir="auto" maxlength="200">
+              <div class="invalid-feedback" data-field="reason"></div>
             </div>
-            <div class="col-12">
-              <div class="form-check">
-                <input class="form-check-input" type="checkbox" id="has_vehicle" name="has_vehicle">
-                <label class="form-check-label" for="has_vehicle">{{ t("volunteer.vehicle") }}</label>
-              </div>
-              <div class="invalid-feedback" data-field="has_vehicle"></div>
-            </div>
+            {% endif %}
           </div>
           <div class="d-flex gap-2 mt-4">
-            <button type="submit" class="btn btn-kb">{{ t("requester.save") }}</button>
-            <a class="btn btn-outline-secondary" href="{{ url_for('account.profile_page') }}">{{ t("requester.back") }}</a>
+            <button type="submit" class="btn btn-kb">{{ t("volunteer.save") }}</button>
+            <a class="btn btn-outline-secondary" href="{{ url_for('account.tasks_page') }}">{{ t("profile.my_tasks") }}</a>
           </div>
         </form>
       </div>
     </div>
+
+    {% if profile %}
+    <div class="card border-0 shadow-sm">
+      <div class="card-body p-4">
+        <h2 class="h6">{{ t("volunteer.away_title") }}</h2>
+        <p class="text-body-secondary small mb-1">{{ t("volunteer.away_optional") }}</p>
+        <p class="text-body-secondary small">{{ t("volunteer.away_lead") }}</p>
+        <div id="period-error" class="alert alert-danger d-none" role="alert"></div>
+        <form id="period-form" novalidate>
+          <div class="row g-3">
+            <div class="col-sm-6">
+              <label for="from_date" class="form-label">{{ t("volunteer.from_date") }}</label>
+              <input id="from_date" name="from_date" type="date" class="form-control">
+              <div class="invalid-feedback" data-field="from_date"></div>
+            </div>
+            <div class="col-sm-6">
+              <label for="until_date" class="form-label">{{ t("volunteer.until_date") }}</label>
+              <input id="until_date" name="until_date" type="date" class="form-control">
+              <div class="invalid-feedback" data-field="until_date"></div>
+            </div>
+            <div class="col-12">
+              <label for="reason" class="form-label">{{ t("volunteer.reason") }}</label>
+              <input id="reason" name="reason" class="form-control" dir="auto" maxlength="200">
+              <div class="invalid-feedback" data-field="reason"></div>
+            </div>
+          </div>
+          <button type="submit" class="btn btn-outline-primary mt-3">{{ t("volunteer.add_period") }}</button>
+        </form>
+        {% if profile.periods %}
+        <ul class="list-group list-group-flush mt-4">
+          {% for period in profile.periods %}
+          <li class="list-group-item px-0 d-flex justify-content-between align-items-start gap-3">
+            <div>
+              <div>{{ period.from_date }} – {{ period.until_date }}</div>
+              {% if period.reason %}<div class="small text-body-secondary" dir="auto">{{ period.reason }}</div>{% endif %}
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-danger" data-cancel-period="{{ period.period_id }}">{{ t("volunteer.cancel_period") }}</button>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-body-secondary small mt-4 mb-0">{{ t("volunteer.no_periods") }}</p>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
   </div>
 </div>
 {% endblock %}
 {% block scripts %}
 <script>
-  KB.bindForm("volunteer-form", "/api/me/volunteer", (form) => ({
-    primary_city: form.primary_city.value,
-    base_frequency: form.base_frequency.value,
-    skills: form.skills.value.split(/[,،、]/).map((s) => s.trim()).filter(Boolean),
-    experience: form.experience.value,
-    has_vehicle: form.has_vehicle.checked,
-  }), () => { window.location.href = "/me/tasks"; });
+  const creating = {{ "false" if profile else "true" }};
+  const form = document.getElementById("volunteer-form");
+
+  KB.bindForm("volunteer-form", creating ? "/api/me/volunteer" : "/api/profile", (current) => ({
+    has_vehicle: current.has_vehicle.checked,
+    experience: current.experience.value,
+    base_frequency: current.base_frequency.value,
+  }), async () => {
+    if (creating && (form.from_date.value || form.until_date.value)) {
+      const period = await KB.post("/api/me/unavailability", {
+        from_date: form.from_date.value,
+        until_date: form.until_date.value,
+        reason: form.reason.value,
+      });
+      if (!period.ok) {
+        const message = period.data.message || window.KB_TEXT.genericError;
+        window.location.href = "/me/volunteer?period_error=" + encodeURIComponent(message);
+        return;
+      }
+    }
+    window.location.href = "/me/volunteer";
+  });
+
+  const periodForm = document.getElementById("period-form");
+  const periodError = document.getElementById("period-error");
+  periodForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    periodError.classList.add("d-none");
+    if (!periodForm.from_date.value && !periodForm.until_date.value) {
+      return;
+    }
+    const button = periodForm.querySelector('button[type="submit"]');
+    button.disabled = true;
+    const result = await KB.post("/api/me/unavailability", {
+      from_date: periodForm.from_date.value,
+      until_date: periodForm.until_date.value,
+      reason: periodForm.reason.value,
+    });
+    button.disabled = false;
+    if (result.ok) {
+      window.location.href = "/me/volunteer";
+      return;
+    }
+    const fields = result.data.fields || {};
+    let shown = false;
+    Object.entries(fields).forEach(([field, message]) => {
+      const feedback = periodForm.querySelector(`.invalid-feedback[data-field="${field}"]`);
+      if (feedback) {
+        feedback.textContent = message;
+        feedback.parentElement.querySelector("input")?.classList.add("is-invalid");
+        shown = true;
+      }
+    });
+    if (!shown) {
+      periodError.textContent = result.data.message || window.KB_TEXT.genericError;
+      periodError.classList.remove("d-none");
+    }
+  });
+
+  document.querySelectorAll("[data-cancel-period]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      const result = await KB.post("/api/me/unavailability/" + button.dataset.cancelPeriod + "/cancel", {});
+      if (result.ok) {
+        window.location.href = "/me/volunteer";
+        return;
+      }
+      button.disabled = false;
+      periodError.textContent = result.data.message || window.KB_TEXT.genericError;
+      periodError.classList.remove("d-none");
+    });
+  });
 </script>
 {% endblock %}
