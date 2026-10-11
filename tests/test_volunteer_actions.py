@@ -246,8 +246,15 @@ def test_volunteer_edits_profile_and_manages_unavailability(app, client, engine)
     assert page.headers["Location"].endswith("/me/volunteer")
     form = client.get("/me/volunteer")
     assert form.status_code == 200
-    body = form.data.decode()
-    assert "עדכון זמינות" in body
+    form_text = form.data.decode()
+    textarea = form_text.split('id="experience"', 1)[1].split("</textarea>", 1)[0]
+    assert "Five years with Magen David Adom" not in textarea
+    assert "Five years with Magen David Adom" in form_text
+    assert "הוספת התנדבות" in form_text
+    edit = client.get(f"/me/volunteer/{profile_id}")
+    assert edit.status_code == 200
+    body = edit.data.decode()
+    assert "פרופיל מתנדב" in body
     assert "Five years with Magen David Adom" in body
     assert "תאריכים שבהם אי אפשר לעזור" in body
 

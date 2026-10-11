@@ -42,7 +42,6 @@ from app.domain.errors import (
     Forbidden,
     InvalidCredentials,
     NotFound,
-    ProfileAlreadyEnabled,
     ValidationError,
 )
 from app.domain.roles import derive_roles
@@ -269,8 +268,6 @@ class UserCommandHandlers:
                 "max_active_tasks": 1 if vp.max_active_tasks is None else vp.max_active_tasks,
                 "max_parallel_tasks": 2 if vp.max_parallel_tasks is None else vp.max_parallel_tasks,
             }
-            if self._users.volunteer_profile_id(conn, cmd.user_id) is not None:
-                raise ProfileAlreadyEnabled("This account is already registered as a volunteer")
             event = self._append_to_user(conn, cmd.user_id, VOLUNTEER_PROFILE_ENABLED, payload, now)
         self._index_enabled_profiles([event])
         return EnableVolunteerResult(profile_id=profile_id, roles=derive_roles(False, True))
@@ -282,9 +279,7 @@ class UserCommandHandlers:
             account = self._require_account(conn, cmd.user_id)
             if account.is_admin:
                 raise Forbidden("An admin account cannot volunteer")
-            existing = self._users.volunteer_profile(conn, cmd.user_id)
-            if existing is None:
-                raise Forbidden("Register as a volunteer before editing the profile")
+            existing = self._profile_for_edit(conn, cmd.user_id, cmd.profile_id)
             status = existing.availability_status if cmd.availability_status is None else cmd.availability_status
             if status == "INACTIVE" and self._users.assigned_task_dates(conn, existing.profile_id):
                 raise ConcurrencyConflict("Release assigned tasks before marking yourself inactive")
@@ -310,9 +305,7 @@ class UserCommandHandlers:
             account = self._require_account(conn, cmd.user_id)
             if account.is_admin:
                 raise Forbidden("An admin account cannot volunteer")
-            existing = self._users.volunteer_profile(conn, cmd.user_id)
-            if existing is None:
-                raise Forbidden("Register as a volunteer before editing the profile")
+            existing = self._profile_for_edit(conn, cmd.user_id, cmd.profile_id)
             payload = {
                 "profile_id": str(existing.profile_id),
                 "primary_city": existing.primary_city,
@@ -336,9 +329,7 @@ class UserCommandHandlers:
             account = self._require_account(conn, cmd.user_id)
             if account.is_admin:
                 raise Forbidden("An admin account cannot volunteer")
-            profile_id = self._users.volunteer_profile_id(conn, cmd.user_id)
-            if profile_id is None:
-                raise Forbidden("Register as a volunteer before editing the profile")
+            profile_id = self._profile_for_edit(conn, cmd.user_id, cmd.profile_id).profile_id
             today = now.date()
             for task_date in self._users.assigned_task_dates(conn, profile_id):
                 covered = today if task_date is None else task_date
@@ -363,11 +354,8 @@ class UserCommandHandlers:
         now = self._clock()
         with self._engine.begin() as conn:
             self._require_account(conn, cmd.user_id)
-            profile_id = self._users.volunteer_profile_id(conn, cmd.user_id)
-            if profile_id is None:
-                raise Forbidden("Register as a volunteer before editing the profile")
             period = self._users.unavailability_period(conn, cmd.unavailability_id)
-            if period is None or period.volunteer_id != profile_id:
+            if period is None or not self._users.owns_volunteer_profile(conn, cmd.user_id, period.volunteer_id):
                 raise NotFound("Unavailability period was not found")
             if period.is_cancelled:
                 raise DomainError("This period is already cancelled")
@@ -378,6 +366,19 @@ class UserCommandHandlers:
                 {"unavailability_id": str(cmd.unavailability_id)},
                 now,
             )
+
+    def _profile_for_edit(self, conn, user_id: uuid.UUID, profile_id: uuid.UUID | None):
+        if profile_id is not None:
+            found = self._users.volunteer_profile_owned(conn, user_id, profile_id)
+            if found is None:
+                raise NotFound("Volunteer profile was not found")
+            return found
+        profiles = self._users.list_volunteer_profiles(conn, user_id)
+        if not profiles:
+            raise Forbidden("Register as a volunteer before editing the profile")
+        if len(profiles) > 1:
+            raise ValidationError({"profile_id": "Choose which volunteering to update"})
+        return profiles[0]
 
     def _require_account(self, conn, user_id: uuid.UUID):
         account = self._users.get_account(conn, user_id)

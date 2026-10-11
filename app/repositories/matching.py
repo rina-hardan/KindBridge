@@ -138,6 +138,22 @@ class SqlMatchingReader:
         )
         return frozenset(_uuid(row.volunteer_id) for row in conn.execute(stmt))
 
+    def declined_user_ids(self, conn: Connection, request_id: UUID) -> frozenset[UUID]:
+        """A release or rejection on one volunteering keeps the whole person off that request."""
+        stmt = (
+            select(volunteer_profiles.c.user_id)
+            .select_from(
+                task_assignments.join(
+                    volunteer_profiles, volunteer_profiles.c.id == task_assignments.c.volunteer_id
+                )
+            )
+            .where(
+                task_assignments.c.request_id == request_id,
+                task_assignments.c.status == "DECLINED",
+            )
+        )
+        return frozenset(_uuid(row.user_id) for row in conn.execute(stmt))
+
     def unavailability(self, conn: Connection, profile_ids: list[UUID]) -> tuple[UnavailabilityPeriod, ...]:
         if not profile_ids:
             return ()

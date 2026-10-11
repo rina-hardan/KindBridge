@@ -48,9 +48,7 @@
       <div class="card-body p-4 d-grid gap-3">
         <h2 class="h6 mb-0">{{ t("profile.choose") }}</h2>
         <div>
-          <a class="btn btn-kb w-100" href="{{ url_for('account.requests_page') if account.has_requester_profile else url_for('account.requester_join_page') }}">
-            {% if account.has_requester_profile %}{{ t("profile.my_requests") }}{% else %}{{ t("profile.ask") }}{% endif %}
-          </a>
+          <a class="btn btn-kb w-100" href="{{ url_for('account.requests_page') }}">{{ t("profile.my_requests") }}</a>
           <p class="form-text mb-0 mt-2">
             {% if account.has_requester_profile %}{{ t("profile.ask_ready") }}{% else %}{{ t("profile.ask_needed") }}{% endif %}
           </p>

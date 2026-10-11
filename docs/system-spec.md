@@ -20,7 +20,7 @@ KindBridge coordinates citizen assistance requests, volunteer capacity, and AI-a
   - `REQUESTER` for every non-admin user.
   - `VOLUNTEER` for a non-admin user with an enabled `volunteer_profiles` row.
   - A person may therefore hold `REQUESTER` and `VOLUNTEER` together.
-- **[CHANGED] Enrollment is not registration.** Public registration writes only the person (`users`). From the account page, "ask for help" saves a `requester_profiles` row and then opens the help-request area. "Volunteer" opens the volunteer area immediately, even when it is empty. There is no enrollment form in front of it. That screen lists volunteering already taken on, and on the side the volunteering the person wants to do. From the header, "add new volunteering" saves a `volunteer_profiles` row: `primary_city` is copied from the residence city, `has_vehicle` is a checkbox used only when a request requires a vehicle, `experience` is one free-text field (domain, traits, past experience, or anything else), and `base_frequency` is how often they can help. The same screen holds unavailability date ranges. "Add new volunteering" opens that screen again, and the form title becomes "Update availability" once a profile exists. Capacity fields are not shown and stay at their defaults. Until the profile exists, the person is not matched. The `REQUESTER` role is still derived for every non-admin user.
+- **[CHANGED] Enrollment is not registration.** Public registration writes only the person (`users`). From the account page, "my requests" opens `/me/requests` immediately, including the first visit, when there is no requester profile and no ticket. Adding a request is not required to open that screen. A `requester_profiles` row is still saved before a ticket is submitted. "Volunteer" opens the volunteer area immediately, even when it is empty. There is no enrollment form in front of it. That screen lists volunteering already taken on, and on the side every volunteering the person wants to do. From the header, "add new volunteering" opens a blank form and inserts another `volunteer_profiles` row for that person: `primary_city` is copied from the residence city, `has_vehicle` is a checkbox used only when a request requires a vehicle, `experience` is one free-text field (domain, traits, past experience, or anything else), and `base_frequency` is how often they can help. The same screen holds unavailability date ranges for the new row. Saving does not change a volunteering that was already saved. Each saved row has its own edit screen. Capacity fields are not shown and stay at their defaults. Until at least one profile exists, the person is not matched. When several profiles of the same person pass the hard filter, only the one with the highest similarity is proposed. The `REQUESTER` role is still derived for every non-admin user.
 - **[NEW] Self-assignment is forbidden:** a volunteer can never be proposed, approved, or overridden onto a request they created (`volunteer_profiles.user_id = help_requests.requester_id`). Enforced by one shared function (`is_self_assignment`) called from the agent filter, `ApproveAssignmentCommand`, and `OverrideAssignmentCommand`.
 - Relational dialect: **Microsoft SQL Server** on Somee.com. Vector store is **ChromaDB**, not pgvector.
 - Application server: **Flask**, organized as CQRS/MVC (see [architecture.md](architecture.md)).
@@ -60,7 +60,7 @@ The source of truth for domain changes is the **event store** (see [event-sourci
 
 ```
 users  (the person)
-  |-- 0..1  volunteer_profiles      (extension: person volunteers)
+  |-- 0..N  volunteer_profiles      (each row is one volunteering the person offers)
   |-- 0..1  requester_profiles      (extension: saved defaults for a person who needs help)
   |-- 0..N  help_requests           (requester_id)
   |-- N..M  exemption_links         (volunteer user <-> requester user)
@@ -117,7 +117,7 @@ Optional 1:1 extension. Holds data that repeats across a person's requests, so t
 | Field | Type | Constraints | Description |
 | :--- | :--- | :--- | :--- |
 | `id` | UNIQUEIDENTIFIER | PK | Profile id |
-| `user_id` | UNIQUEIDENTIFIER | UNIQUE, FK users, NOT NULL | 1:1 with the user |
+| `user_id` | UNIQUEIDENTIFIER | FK users, NOT NULL, indexed | The person. One person may have many rows |
 | `is_enabled` | BIT | NOT NULL, default 1 | **[NEW]** Volunteer role switch. Disabling keeps all data |
 | `primary_city` | NVARCHAR(100) | Indexed, NOT NULL | Home municipality. Copied from `users.city` when add-volunteering omits it. The form does not ask again |
 | `has_vehicle` | BIT | NOT NULL, default 0 | Transport available. A checkbox on add-volunteering. The agent uses it only when the request has `requires_vehicle = 1`. It is not asked on each task |
@@ -322,7 +322,7 @@ Stage 1 of `ProposeMatchCommand`. It runs as plain code (a SQL query / MCP tool)
 | 8 | Capacity | Per the concurrency rules in 4.4 |
 | 9 | Schedule overlap | Per the concurrency rules in 4.4 |
 
-`SUPERSEDED` rows are leftover proposals, not a blacklist. The filter also records **why** each volunteer was excluded (counts per check) in the `NoMatchFound` payload so the dispatcher sees what is missing before deciding on an override.
+`SUPERSEDED` rows are leftover proposals, not a blacklist. The filter also records **why** each volunteer was excluded (counts per check) in the `NoMatchFound` payload so the dispatcher sees what is missing before deciding on an override. A person with several profiles is one volunteer: after the checks, only their highest-similarity profile stays in the candidate list. A `DECLINED` assignment on any of their profiles keeps every profile of that person off this request.
 
 ### 4.3 Changes after assignment
 
@@ -387,7 +387,7 @@ Only volunteers who passed 4.2 are ranked. Inputs: semantic similarity between t
 
 ## 6. User workflows (course 4.1-4.5)
 
-1. **Data entry:** register with name, email, phone, password, residence city, and home address only. From the account page the person saves a requester profile before the help-request area. The volunteer area opens without a profile, with an empty taken-on list and an empty want-to-do column. "Add new volunteering" on that area saves the vehicle checkbox, one free-text narrative, frequency, and optional unavailability dates; the city is the residence city. Opening that form again updates the same profile. A requester then creates a ticket. A ticket is not edited; the owner cancels it and submits a new one. Names, cities, addresses, and the narrative may be entered in Hebrew or English and are stored as written. On SQL Server those columns are bound as NVARCHAR so Hebrew is kept.
+1. **Data entry:** register with name, email, phone, password, residence city, and home address only. From the account page, "my requests" opens the help-request area without a requester profile and without a ticket. A requester profile is still saved before a ticket is submitted. The volunteer area opens without a profile, with an empty taken-on list and an empty want-to-do column. "Add new volunteering" on that area saves the vehicle checkbox, one free-text narrative, frequency, and optional unavailability dates; the city is the residence city. Opening that form again adds another volunteering and leaves the saved ones unchanged. Each saved volunteering is edited on its own screen. A requester then creates a ticket. A ticket is not edited; the owner cancels it and submits a new one. Names, cities, addresses, and the narrative may be entered in Hebrew or English and are stored as written. On SQL Server those columns are bound as NVARCHAR so Hebrew is kept.
 2. **Search:** filters on category, city, urgency, status (requester: own rows; admin: all; volunteer: assigned tasks).
 3. **Table:** queues, candidates per ticket, history.
 4. **Detail:** narrative, scoped location, AI score breakdown for each of the K candidates, concurrency type, exclusion summary when `NO_MATCH`.

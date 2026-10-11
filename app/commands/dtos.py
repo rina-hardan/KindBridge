@@ -147,6 +147,7 @@ class UpdateVolunteerSkillsCommand(Command):
 
     user_id: UUID
     skills: tuple[str, ...]
+    profile_id: UUID | None = None
 
     @classmethod
     def from_payload(cls, user_id: UUID, data: Any) -> "UpdateVolunteerSkillsCommand":
@@ -154,9 +155,10 @@ class UpdateVolunteerSkillsCommand(Command):
             raise ValidationError({"body": "Expected a JSON object"})
         errors: dict[str, str] = {}
         skills = _skills(data.get("skills", []), errors)
+        profile_id = _optional_uuid(data, "profile_id", errors)
         if errors:
             raise ValidationError(errors)
-        return cls(user_id=user_id, skills=skills)
+        return cls(user_id=user_id, skills=skills, profile_id=profile_id)
 
 
 @dataclass(frozen=True)
@@ -164,6 +166,7 @@ class UpdateVolunteerProfileCommand(Command):
     user_id: UUID
     profile: VolunteerProfileInput
     availability_status: str | None
+    profile_id: UUID | None = None
 
     @classmethod
     def from_payload(cls, user_id: UUID, data: Any) -> "UpdateVolunteerProfileCommand":
@@ -171,6 +174,7 @@ class UpdateVolunteerProfileCommand(Command):
             raise ValidationError({"body": "Expected a JSON object"})
         errors: dict[str, str] = {}
         profile = _volunteer_profile(data, errors, prefix="")
+        profile_id = _optional_uuid(data, "profile_id", errors)
         status = data.get("availability_status", None)
         if status is None:
             pass
@@ -180,7 +184,7 @@ class UpdateVolunteerProfileCommand(Command):
         if errors:
             raise ValidationError(errors)
         assert profile is not None
-        return cls(user_id=user_id, profile=profile, availability_status=status)
+        return cls(user_id=user_id, profile=profile, availability_status=status, profile_id=profile_id)
 
 
 @dataclass(frozen=True)
@@ -189,6 +193,7 @@ class AddVolunteerUnavailabilityCommand(Command):
     from_date: str
     until_date: str
     reason: str | None
+    profile_id: UUID | None = None
 
     @classmethod
     def from_payload(cls, user_id: UUID, data: Any) -> "AddVolunteerUnavailabilityCommand":
@@ -198,12 +203,19 @@ class AddVolunteerUnavailabilityCommand(Command):
         from_date = _named_date(data, "from_date", errors)
         until_date = _named_date(data, "until_date", errors)
         reason = _optional_text(data, "reason", errors, max_len=200)
+        profile_id = _optional_uuid(data, "profile_id", errors)
         if from_date and until_date and until_date < from_date and "until_date" not in errors:
             errors["until_date"] = "End date must be on or after the start date"
         if errors:
             raise ValidationError(errors)
         assert from_date is not None and until_date is not None
-        return cls(user_id=user_id, from_date=from_date, until_date=until_date, reason=reason)
+        return cls(
+            user_id=user_id,
+            from_date=from_date,
+            until_date=until_date,
+            reason=reason,
+            profile_id=profile_id,
+        )
 
 
 @dataclass(frozen=True)
@@ -456,6 +468,17 @@ def _text(data: dict, field: str, errors: dict[str, str], max_len: int) -> str:
     if len(value) > max_len:
         errors[field] = f"Must be at most {max_len} characters"
     return value
+
+
+def _optional_uuid(data: dict, field: str, errors: dict[str, str]) -> UUID | None:
+    raw = data.get(field)
+    if raw is None or raw == "":
+        return None
+    try:
+        return UUID(str(raw))
+    except (ValueError, AttributeError, TypeError):
+        errors[field] = "Invalid input"
+        return None
 
 
 def _optional_text(data: dict, field: str, errors: dict[str, str], max_len: int) -> str | None:

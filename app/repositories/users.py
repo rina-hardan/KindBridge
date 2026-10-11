@@ -3,7 +3,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import date
 
-from sqlalchemy import Connection, func, select, true
+from sqlalchemy import Connection, exists, func, select, true
 
 from app.repositories.requests import as_date
 from app.repositories.tables import (
@@ -75,18 +75,20 @@ class UserRepository:
     """Read access to the users projection for authentication decisions."""
 
     def get_auth_record(self, conn: Connection, email: str) -> AuthRecord | None:
-        stmt = (
-            select(
-                users.c.id,
-                users.c.password_hash,
-                users.c.full_name,
-                users.c.is_admin,
-                users.c.is_active,
-                volunteer_profiles.c.is_enabled,
+        has_enabled = exists(
+            select(volunteer_profiles.c.id).where(
+                volunteer_profiles.c.user_id == users.c.id,
+                volunteer_profiles.c.is_enabled == true(),
             )
-            .select_from(users.outerjoin(volunteer_profiles, volunteer_profiles.c.user_id == users.c.id))
-            .where(users.c.email == email)
         )
+        stmt = select(
+            users.c.id,
+            users.c.password_hash,
+            users.c.full_name,
+            users.c.is_admin,
+            users.c.is_active,
+            has_enabled.label("has_enabled_volunteer_profile"),
+        ).where(users.c.email == email)
         row = conn.execute(stmt).first()
         if row is None:
             return None
@@ -96,7 +98,7 @@ class UserRepository:
             full_name=row.full_name,
             is_admin=bool(row.is_admin),
             is_active=bool(row.is_active),
-            has_enabled_volunteer_profile=bool(row.is_enabled),
+            has_enabled_volunteer_profile=bool(row.has_enabled_volunteer_profile),
         )
 
     def email_exists(self, conn: Connection, email: str) -> bool:
@@ -143,28 +145,41 @@ class UserRepository:
         return None if row is None else row.id
 
     def volunteer_profile_id(self, conn: Connection, user_id: uuid.UUID) -> uuid.UUID | None:
-        stmt = select(volunteer_profiles.c.id).where(volunteer_profiles.c.user_id == user_id)
+        stmt = select(volunteer_profiles.c.id).where(volunteer_profiles.c.user_id == user_id).limit(1)
         row = conn.execute(stmt).first()
         return None if row is None else row.id
 
-    def volunteer_profile(self, conn: Connection, user_id: uuid.UUID) -> VolunteerProfileRecord | None:
-        row = conn.execute(select(volunteer_profiles).where(volunteer_profiles.c.user_id == user_id)).first()
-        if row is None:
-            return None
-        raw_skills = json.loads(row.skills_json or "[]")
-        skills = tuple(str(item) for item in raw_skills) if isinstance(raw_skills, list) else ()
-        return VolunteerProfileRecord(
-            profile_id=row.id,
-            primary_city=row.primary_city,
-            has_vehicle=bool(row.has_vehicle),
-            skills=skills,
-            experience=row.experience,
-            base_frequency=row.base_frequency,
-            availability_status=row.availability_status,
-            max_active_tasks=int(row.max_active_tasks),
-            max_parallel_tasks=int(row.max_parallel_tasks),
-            is_enabled=bool(row.is_enabled),
+    def list_volunteer_profiles(self, conn: Connection, user_id: uuid.UUID) -> tuple[VolunteerProfileRecord, ...]:
+        rows = conn.execute(
+            select(volunteer_profiles)
+            .where(volunteer_profiles.c.user_id == user_id)
+            .order_by(volunteer_profiles.c.id)
         )
+        return tuple(_volunteer_profile_record(row) for row in rows)
+
+    def volunteer_profile(self, conn: Connection, user_id: uuid.UUID) -> VolunteerProfileRecord | None:
+        profiles = self.list_volunteer_profiles(conn, user_id)
+        return None if not profiles else profiles[0]
+
+    def volunteer_profile_owned(
+        self, conn: Connection, user_id: uuid.UUID, profile_id: uuid.UUID
+    ) -> VolunteerProfileRecord | None:
+        row = conn.execute(
+            select(volunteer_profiles).where(
+                volunteer_profiles.c.id == profile_id,
+                volunteer_profiles.c.user_id == user_id,
+            )
+        ).first()
+        return None if row is None else _volunteer_profile_record(row)
+
+    def owns_volunteer_profile(self, conn: Connection, user_id: uuid.UUID, profile_id: uuid.UUID) -> bool:
+        row = conn.execute(
+            select(volunteer_profiles.c.id).where(
+                volunteer_profiles.c.id == profile_id,
+                volunteer_profiles.c.user_id == user_id,
+            )
+        ).first()
+        return row is not None
 
     def unavailability_periods(self, conn: Connection, profile_id: uuid.UUID) -> tuple[UnavailabilityRecord, ...]:
         rows = conn.execute(
@@ -242,6 +257,23 @@ class UserRepository:
     def admin_exists(self, conn: Connection) -> bool:
         stmt = select(users.c.id).where(users.c.is_admin == true()).limit(1)
         return conn.execute(stmt).first() is not None
+
+
+def _volunteer_profile_record(row) -> VolunteerProfileRecord:
+    raw_skills = json.loads(row.skills_json or "[]")
+    skills = tuple(str(item) for item in raw_skills) if isinstance(raw_skills, list) else ()
+    return VolunteerProfileRecord(
+        profile_id=row.id,
+        primary_city=row.primary_city,
+        has_vehicle=bool(row.has_vehicle),
+        skills=skills,
+        experience=row.experience,
+        base_frequency=row.base_frequency,
+        availability_status=row.availability_status,
+        max_active_tasks=int(row.max_active_tasks),
+        max_parallel_tasks=int(row.max_parallel_tasks),
+        is_enabled=bool(row.is_enabled),
+    )
 
 
 def _unavailability(row) -> UnavailabilityRecord:

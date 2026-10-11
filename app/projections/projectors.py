@@ -86,19 +86,18 @@ class UserProjector:
 
     def _on_VolunteerProfileEnabled(self, conn: Connection, event: DomainEvent) -> None:
         p = event.payload
+        profile_id = uuid.UUID(p["profile_id"])
         existing = conn.execute(
-            select(volunteer_profiles.c.id).where(volunteer_profiles.c.user_id == event.aggregate_id)
+            select(volunteer_profiles.c.id).where(volunteer_profiles.c.id == profile_id)
         ).first()
         if existing is not None:
             conn.execute(
-                update(volunteer_profiles)
-                .where(volunteer_profiles.c.user_id == event.aggregate_id)
-                .values(is_enabled=True)
+                update(volunteer_profiles).where(volunteer_profiles.c.id == profile_id).values(is_enabled=True)
             )
             return
         conn.execute(
             insert(volunteer_profiles).values(
-                id=uuid.UUID(p["profile_id"]),
+                id=profile_id,
                 user_id=event.aggregate_id,
                 is_enabled=True,
                 primary_city=p["primary_city"],

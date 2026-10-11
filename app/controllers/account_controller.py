@@ -1,7 +1,7 @@
 from datetime import date
 from uuid import UUID
 
-from flask import Blueprint, current_app, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, abort, current_app, jsonify, redirect, render_template, request, url_for
 
 from app.commands.dtos import (
     AddVolunteerUnavailabilityCommand,
@@ -128,7 +128,29 @@ def volunteer_join_page():
     admin = _redirect_admin(account)
     if admin is not None:
         return admin
-    profile = _profiles_query().execute(account.user_id, today=date.today())
+    notice = request.args.get("period_error", "")
+    if len(notice) > 300:
+        notice = notice[:300]
+    return render_template(
+        "account/volunteer_join.html",
+        account=account,
+        profile=None,
+        offers=_profiles_query().list_for(account.user_id, today=date.today()),
+        period_error=notice,
+    )
+
+
+@account_bp.get("/me/volunteer/<uuid:profile_id>")
+def volunteer_edit_page(profile_id: UUID):
+    account, bounce = _account_or_login()
+    if bounce is not None:
+        return bounce
+    admin = _redirect_admin(account)
+    if admin is not None:
+        return admin
+    profile = _profiles_query().execute_one(account.user_id, profile_id, today=date.today())
+    if profile is None:
+        abort(404)
     notice = request.args.get("period_error", "")
     if len(notice) > 300:
         notice = notice[:300]
@@ -136,6 +158,7 @@ def volunteer_join_page():
         "account/volunteer_join.html",
         account=account,
         profile=profile,
+        offers=_profiles_query().list_for(account.user_id, today=date.today()),
         period_error=notice,
     )
 
@@ -166,8 +189,6 @@ def requests_page():
     admin = _redirect_admin(account)
     if admin is not None:
         return admin
-    if not account.has_requester_profile:
-        return redirect(url_for("account.requester_join_page"))
     return render_template(
         "account/requests_home.html",
         categories=CATEGORIES,
@@ -212,11 +233,11 @@ def tasks_page():
         page=_page_arg(),
         today=date.today(),
     )
-    profile = _profiles_query().execute(account.user_id, today=date.today())
+    profiles = _profiles_query().list_for(account.user_id, today=date.today())
     return render_template(
         "account/tasks_home.html",
         tasks=found,
-        profile=profile,
+        profiles=profiles,
     )
 
 

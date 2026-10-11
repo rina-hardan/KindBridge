@@ -84,7 +84,7 @@ CREATE TABLE dbo.requester_profiles (
     CONSTRAINT FK_requester_profiles_user FOREIGN KEY (user_id) REFERENCES dbo.users(id)
 );
 
--- 4. Volunteer Profiles (1:1 Extension for Volunteers)
+-- 4. Volunteer profiles. One person may offer many volunteerings.
 IF OBJECT_ID(N'dbo.volunteer_profiles', N'U') IS NULL
 CREATE TABLE dbo.volunteer_profiles (
     id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWSEQUENTIALID(),
@@ -100,9 +100,26 @@ CREATE TABLE dbo.volunteer_profiles (
     max_parallel_tasks INT NOT NULL DEFAULT 2,
     current_active_tasks INT NOT NULL DEFAULT 0,
     current_parallel_tasks INT NOT NULL DEFAULT 0,
-    CONSTRAINT UQ_volunteer_profiles_user UNIQUE (user_id),
     CONSTRAINT FK_volunteer_profiles_user FOREIGN KEY (user_id) REFERENCES dbo.users(id)
 );
+
+-- Older databases kept one volunteering per person. Drop that unique key so another row can be inserted.
+EXEC sp_executesql N'
+DECLARE @sql nvarchar(max) = N'''';
+SELECT @sql = N''ALTER TABLE dbo.volunteer_profiles DROP CONSTRAINT '' + QUOTENAME(kc.name) + N'';''
+FROM sys.key_constraints AS kc
+INNER JOIN sys.index_columns AS ic
+    ON ic.object_id = kc.parent_object_id AND ic.index_id = kc.unique_index_id
+INNER JOIN sys.columns AS c
+    ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+WHERE kc.parent_object_id = OBJECT_ID(N''dbo.volunteer_profiles'')
+  AND kc.[type] = N''UQ''
+  AND c.name = N''user_id'';
+IF @sql <> N'''' EXEC sp_executesql @sql;
+';
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_volunteer_profiles_user' AND object_id = OBJECT_ID(N'dbo.volunteer_profiles'))
+CREATE INDEX IX_volunteer_profiles_user ON dbo.volunteer_profiles(user_id);
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_volunteer_profiles_primary_city' AND object_id = OBJECT_ID(N'dbo.volunteer_profiles'))
 CREATE INDEX IX_volunteer_profiles_primary_city ON dbo.volunteer_profiles(primary_city);

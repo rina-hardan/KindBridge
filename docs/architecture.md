@@ -167,10 +167,11 @@ All mutating routes: CSRF + JWT. Prefix `/`.
 | POST | `/api/me/account` | any authenticated | `UpdateAccountDetailsCommand` (email cannot change) |
 | GET | `/me/requester` | non-admin | requester enrollment view; redirects to `/me/requests` when a requester profile exists |
 | POST | `/api/me/requester` | non-admin | `UpdateRequesterProfileCommand` |
-| GET | `/me/volunteer` | non-admin | add-volunteering form, also used to update availability. Vehicle, free text, frequency, and unavailability periods. No city field |
-| POST | `/api/me/volunteer` | non-admin | `EnableVolunteerProfileCommand` |
+| GET | `/me/volunteer` | non-admin | blank add-volunteering form. Vehicle, free text, frequency, and optional unavailability. No city field. Does not load a saved row |
+| GET | `/me/volunteer/<profile_id>` | non-admin | edit one of the caller's volunteerings. 404 when the row is not theirs |
+| POST | `/api/me/volunteer` | non-admin | `EnableVolunteerProfileCommand`. Always inserts another profile |
 | GET | `/dashboard` | ADMIN | `GetAdminDashboardQuery` |
-| GET | `/me/requests` | non-admin with a requester profile | own-ticket table; otherwise redirect to `/me/requester` |
+| GET | `/me/requests` | non-admin | own-ticket table, including when there is no requester profile and no ticket. Does not redirect to enrollment |
 | GET | `/me/requests/new` | non-admin with a requester profile | create-request form; otherwise redirect to `/me/requester` |
 | GET | `/api/me/requests` | REQUESTER | `GetMyRequestsQuery` (status, category, urgency, city; status defaults to open) |
 | GET | `/requests` | scoped | `SearchHelpRequestsQuery` |
@@ -193,7 +194,7 @@ There is no request-update route. Replacing a ticket means cancel, then submit a
 | POST | `/api/requests/<id>/reject` | ADMIN | `RejectAssignmentCommand` |
 | POST | `/api/requests/<id>/override` | ADMIN | `OverrideAssignmentCommand` |
 | POST | `/api/requests/<id>/retrigger` | ADMIN | `RetriggerMatchCommand` |
-| GET | `/me/tasks` | non-admin | Volunteer area. Opens with or without a volunteer profile. `GetVolunteerTasksQuery` for the caller's own `ASSIGNED` and `COMPLETED` tasks (filter `status`, `page`) in the "took on" column. `GetMyProfilesQuery` fills the "want to do" column. Header always links to `/me/volunteer` ("Add new volunteering"). Assigned rows offer Complete and Release |
+| GET | `/me/tasks` | non-admin | Volunteer area. Opens with or without a volunteer profile. `GetVolunteerTasksQuery` for the caller's own `ASSIGNED` and `COMPLETED` tasks (filter `status`, `page`) in the "took on" column. `GetMyProfilesQuery` lists every "want to do" row, each linking to its edit screen. Header always links to a blank `/me/volunteer` ("Add new volunteering"). Assigned rows offer Complete and Release |
 | GET | `/api/me/tasks` | VOLUNTEER | same query as JSON. Address and phone are returned only for `ASSIGNED` tasks, otherwise `null` |
 | GET | `/me/profile` | non-admin | redirects to `/me/volunteer` |
 | GET | `/api/me/profile` | VOLUNTEER | `GetMyProfilesQuery` as JSON, including open unavailability periods |

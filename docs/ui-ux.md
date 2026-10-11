@@ -36,11 +36,11 @@ Goal: professional, calm civic-ops UI (not a marketing landing page). Screen cop
 | `/` | Opens `/login`. A signed-in person goes to `/me` |
 | `/login` | Email, password, link to register |
 | `/register` | Person only. Full name, email, phone, password, residence city, home address. No requester or volunteer fields. Admin is seeded and has no residence fields |
-| `/me` | Account. Personal details, with email shown and not editable. Name, phone, city, and home address can be saved. Beside the form, two entries: ask for help, and volunteer |
-| `/me/requester` | Entry when the person has no requester profile. Saves default city, default address, accessibility notes, and emergency contact, then opens `/me/requests` |
-| `/me/volunteer` | Add volunteering, or update it later. Vehicle checkbox, one free-text field (domain, traits, past experience), and frequency. Unavailability dates are optional and may be left blank. City is the residence city and is not asked. Capacity and the inactive toggle are not shown. Saving stays on this screen |
-| `/me/requests` | Help-request area, only after a requester profile exists. Filterable table of the person's own tickets, a link to create one, and cancel. There is no edit action |
-| `/me/tasks` | Volunteer area, opened directly from the account page, including when both lists are empty. No enrollment form in front of it. Header button is always "Add new volunteering" and opens `/me/volunteer`. The main column is "Volunteering you took on": the volunteer's own `ASSIGNED` and `COMPLETED` tasks, with a status filter and pagination (20 rows). Address and phone are shown for `ASSIGNED` tasks and masked `••••` for `COMPLETED`. An assigned row has Complete and Release. The other column, on the left in Hebrew, is "Volunteering you want to do": the saved narrative, frequency, and vehicle flag, or an empty state |
+| `/me` | Account. Personal details, with email shown and not editable. Name, phone, city, and home address can be saved. Beside the form, two entries: my requests, and volunteer |
+| `/me/requester` | Saves default city, default address, accessibility notes, and emergency contact, then opens `/me/requests`. Not shown before the requests area. Reached when creating a ticket and no requester profile exists yet |
+| `/me/volunteer` | Blank form for a new volunteering. Vehicle checkbox, one free-text field (domain, traits, past experience), and frequency. Unavailability dates are optional and may be left blank. City is the residence city and is not asked. Capacity and the inactive toggle are not shown. Saving adds a row and returns to `/me/tasks` |
+| `/me/requests` | Help-request area, opened directly from the account page the first time as well. No requester profile and no ticket are required. Filterable table of the person's own tickets, a link to create one, and cancel. There is no edit action |
+| `/me/tasks` | Volunteer area, opened directly from the account page, including when both lists are empty. No enrollment form in front of it. Header button is always "Add new volunteering" and opens a blank `/me/volunteer`. The main column is "Volunteering you took on": the volunteer's own `ASSIGNED` and `COMPLETED` tasks, with a status filter and pagination (20 rows). Address and phone are shown for `ASSIGNED` tasks and masked `••••` for `COMPLETED`. An assigned row has Complete and Release. The other column, on the left in Hebrew, is "Volunteering you want to do": every saved narrative, frequency, and vehicle flag, each with Edit, or an empty state |
 
 ### Requester
 
@@ -54,9 +54,10 @@ Goal: professional, calm civic-ops UI (not a marketing landing page). Screen cop
 
 | Route | Content |
 | :--- | :--- |
-| `/me/volunteer` | Vehicle, free-text narrative, frequency, and date ranges the volunteer cannot help (from–until, add, cancel). Opened by "Add new volunteering" on `/me/tasks`. The form title is "Add volunteering" until a profile exists, then "Update availability" |
+| `/me/volunteer` | Blank form: vehicle, free-text narrative, frequency, and optional date ranges. Opened by "Add new volunteering". The title stays "Add volunteering". Saving creates a new row |
+| `/me/volunteer/<profile_id>` | The same fields for one saved volunteering, prefilled, plus its date ranges. Saving updates that row only |
 | `/me/profile` | Redirects to `/me/volunteer` |
-| `/me/tasks` | Two columns. Main: ASSIGNED / COMPLETED under "Volunteering you took on", with Complete and Release; address and phone visible for ASSIGNED tasks. Release asks for confirmation. Left in Hebrew: "Volunteering you want to do". Header: "Add new volunteering" |
+| `/me/tasks` | Two columns. Main: ASSIGNED / COMPLETED under "Volunteering you took on", with Complete and Release; address and phone visible for ASSIGNED tasks. Release asks for confirmation. Left in Hebrew: every "Volunteering you want to do", each with Edit. Header: "Add new volunteering" opens a blank form |
 
 ### Admin
 

@@ -13,7 +13,7 @@
 </header>
 
 <div class="row g-4 align-items-start">
-  <div class="col-lg-8">
+  <div class="col-lg-8 order-2 order-lg-1">
     <h2 class="h5 mb-3">{{ t("tasks.taken_title") }}</h2>
     <form class="card border-0 shadow-sm mb-4" method="get" action="{{ url_for('account.tasks_page') }}">
       <div class="card-body">
@@ -133,16 +133,21 @@
     </div>
     {% endif %}
   </div>
-  <aside class="col-lg-4">
+  <aside class="col-lg-4 order-1 order-lg-2">
     <div class="card border-0 shadow-sm">
       <div class="card-body p-4">
         <h2 class="h5 mb-3">{{ t("tasks.wanted_title") }}</h2>
-        {% if profile %}
-        <p class="mb-2" dir="auto">{{ profile.experience }}</p>
-        <p class="text-body-secondary small mb-1">{{ t("volunteer." + profile.base_frequency|lower) }}</p>
-        {% if profile.has_vehicle %}
-        <p class="text-body-secondary small mb-0">{{ t("volunteer.vehicle") }}</p>
-        {% endif %}
+        {% if profiles %}
+        {% for profile in profiles %}
+        <article class="{% if not loop.last %}mb-3 pb-3 border-bottom{% endif %}">
+          <p class="mb-2" dir="auto">{{ profile.experience }}</p>
+          <p class="text-body-secondary small mb-1">{{ t("volunteer." + profile.base_frequency|lower) }}</p>
+          {% if profile.has_vehicle %}
+          <p class="text-body-secondary small mb-2">{{ t("volunteer.vehicle") }}</p>
+          {% endif %}
+          <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('account.volunteer_edit_page', profile_id=profile.profile_id) }}">{{ t("tasks.offer_edit") }}</a>
+        </article>
+        {% endfor %}
         {% else %}
         <p class="text-body-secondary mb-0">{{ t("tasks.wanted_empty") }}</p>
         {% endif %}

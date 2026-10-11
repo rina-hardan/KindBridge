@@ -72,19 +72,37 @@ class VolunteerProfileView:
 
 
 class GetMyProfilesQuery:
-    """The signed-in person's volunteer profile and open unavailability periods."""
+    """The signed-in person's volunteerings and the open unavailability periods on each."""
 
     def __init__(self, engine: Engine, users: UserRepository) -> None:
         self._engine = engine
         self._users = users
 
-    def execute(self, user_id: uuid.UUID, *, today: date | None = None) -> VolunteerProfileView | None:
+    def list_for(self, user_id: uuid.UUID, *, today: date | None = None) -> tuple[VolunteerProfileView, ...]:
         today = today or date.today()
         with self._engine.connect() as conn:
-            profile = self._users.volunteer_profile(conn, user_id)
+            profiles = self._users.list_volunteer_profiles(conn, user_id)
+            periods = {
+                profile.profile_id: self._users.unavailability_periods(conn, profile.profile_id) for profile in profiles
+            }
+        return tuple(self._view(profile, periods[profile.profile_id], today) for profile in profiles)
+
+    def execute(self, user_id: uuid.UUID, *, today: date | None = None) -> VolunteerProfileView | None:
+        found = self.list_for(user_id, today=today)
+        return None if not found else found[0]
+
+    def execute_one(
+        self, user_id: uuid.UUID, profile_id: uuid.UUID, *, today: date | None = None
+    ) -> VolunteerProfileView | None:
+        today = today or date.today()
+        with self._engine.connect() as conn:
+            profile = self._users.volunteer_profile_owned(conn, user_id, profile_id)
             if profile is None:
                 return None
             periods = self._users.unavailability_periods(conn, profile.profile_id)
+        return self._view(profile, periods, today)
+
+    def _view(self, profile, periods, today: date) -> VolunteerProfileView:
         covering = any(item.from_date <= today <= item.until_date for item in periods)
         if profile.availability_status == "INACTIVE":
             display = "INACTIVE"

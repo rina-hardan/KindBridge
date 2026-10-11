@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from uuid import UUID
 
 from sqlalchemy import false, func, select, true
 from sqlalchemy.dialects import mssql
@@ -97,10 +98,20 @@ def test_update_account_keeps_email_and_encrypts_phone(client, engine):
     assert "email" not in updated
 
 
-def test_requester_entry_saves_profile_then_opens_requests(client, engine):
+def test_requests_area_opens_before_a_profile_or_a_ticket(client, engine):
     register(client, REQUESTER)
 
-    assert client.get("/me/requests").headers["Location"].endswith("/me/requester")
+    area = client.get("/me/requests")
+    assert area.status_code == 200
+    assert "בקשות עזרה".encode() in area.data
+    account = client.get("/me")
+    assert account.status_code == 200
+    body = account.data.decode()
+    assert "הבקשות שלי" in body
+    assert 'href="/me/requests"' in body
+    assert "מסך הבקשות נפתח ישר" in body
+    assert client.get("/api/me/requests").get_json()["total"] == 0
+
     form = client.get("/me/requester")
     assert form.status_code == 200
     assert "רישום לבקשת עזרה".encode() in form.data
@@ -179,6 +190,15 @@ def test_volunteer_area_opens_before_a_profile_exists(client, engine):
     assert "עזרה לקשישים".encode() in again.data
     assert "מוכן לעשות".encode() not in again.data
     assert "ההתנדבות שלי".encode() in client.get("/me").data
+
+    blank = client.get("/me/volunteer")
+    assert blank.status_code == 200
+    blank_text = blank.data.decode()
+    assert "הוספת התנדבות" in blank_text
+    assert "עזרה לקשישים" in blank_text
+    textarea = blank_text.split('id="experience"', 1)[1].split("</textarea>", 1)[0]
+    assert "עזרה לקשישים" not in textarea
+    assert "פרופיל מתנדב" not in blank_text
 
 
 def test_volunteering_form_keeps_city_and_capacity(client, engine):
@@ -262,15 +282,66 @@ def test_volunteer_enrollment_validates_profile(client):
     assert "max_active_tasks" in fields
 
 
-def test_second_volunteer_enrollment_conflicts(client):
+def test_second_volunteering_is_a_new_row(client, engine):
     register(client, VOLUNTEER)
     login(client, VOLUNTEER["email"], VOLUNTEER["password"])
-    enable_volunteer(client)
+    first = enable_volunteer(
+        client,
+        {
+            "has_vehicle": False,
+            "experience": "ליווי קשישים ביום ראשון",
+            "base_frequency": "WEEKLY",
+        },
+    )
+    assert first.status_code == 201
+    first_id = first.get_json()["profile_id"]
 
-    response = enable_volunteer(client)
+    blank = client.get("/me/volunteer")
+    blank_text = blank.data.decode()
+    textarea = blank_text.split('id="experience"', 1)[1].split("</textarea>", 1)[0]
+    assert "ליווי קשישים" not in textarea
+    assert "ליווי קשישים ביום ראשון" in blank_text
 
-    assert response.status_code == 409
-    assert response.get_json()["error"] == "profile_exists"
+    second = enable_volunteer(
+        client,
+        {
+            "has_vehicle": True,
+            "experience": "הסעת תרופות לבית המרקחת",
+            "base_frequency": "ON_DEMAND",
+        },
+    )
+    assert second.status_code == 201
+    second_id = second.get_json()["profile_id"]
+    assert second_id != first_id
+
+    with engine.connect() as conn:
+        rows = conn.execute(select(volunteer_profiles).order_by(volunteer_profiles.c.experience)).all()
+    assert [row.experience for row in rows] == ["הסעת תרופות לבית המרקחת", "ליווי קשישים ביום ראשון"]
+
+    page = client.get("/me/tasks").data.decode()
+    assert "ליווי קשישים ביום ראשון" in page
+    assert "הסעת תרופות לבית המרקחת" in page
+
+    edited = csrf_post(
+        client,
+        "/api/profile",
+        {
+            "profile_id": first_id,
+            "has_vehicle": False,
+            "experience": "ליווי קשישים ביום שני",
+            "base_frequency": "WEEKLY",
+        },
+    )
+    assert edited.status_code == 200
+    with engine.connect() as conn:
+        kept = conn.execute(
+            select(volunteer_profiles.c.experience).where(volunteer_profiles.c.id == UUID(second_id))
+        ).scalar_one()
+    assert kept == "הסעת תרופות לבית המרקחת"
+    edit_page = client.get(f"/me/volunteer/{first_id}")
+    assert edit_page.status_code == 200
+    assert "ליווי קשישים ביום שני" in edit_page.data.decode()
+    assert client.get(f"/me/volunteer/{second_id}").status_code == 200
 
 
 def test_admin_cannot_enroll(app, client):

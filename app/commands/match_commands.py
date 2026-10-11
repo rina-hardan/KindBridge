@@ -27,6 +27,7 @@ from app.domain.matching import (
     RequestRecord,
     ScoredVolunteer,
     VolunteerRecord,
+    DECLINED,
     count_rejections,
     default_concurrency,
     rank_proposals,
@@ -292,6 +293,7 @@ class MatchCommandHandlers:
                 work.rejections.append("inactive")
         with self._engine.connect() as conn:
             volunteers = self._reader.load_volunteers(conn, profile_ids)
+            declined_users = self._reader.declined_user_ids(conn, view.request_id)
             facts = FilterFacts(
                 request=view,
                 exemptions=self._reader.exemption_user_ids(conn, view.requester_id),
@@ -315,10 +317,13 @@ class MatchCommandHandlers:
                 work.rejections.append("inactive")
                 continue
             reason = rejection_reason(volunteer, facts)
+            if reason is None and volunteer.user_id in declined_users:
+                reason = DECLINED
             if reason is not None:
                 work.rejections.append(reason)
                 continue
             work.candidates.append(_Candidate(volunteer=volunteer, similarity=_unit(hit.similarity)))
+        work.candidates = _one_profile_per_person(work.candidates)
 
     def capacity(self, work: MatchWork) -> None:
         if work.stop:
@@ -474,6 +479,22 @@ class MatchCommandHandlers:
 
     def _today(self):
         return self._clock().date()
+
+
+def _one_profile_per_person(candidates: list[_Candidate]) -> list[_Candidate]:
+    """Several volunteerings belong to one person. Keep the closest résumé."""
+    best: dict[UUID, _Candidate] = {}
+    for candidate in candidates:
+        user_id = candidate.volunteer.user_id
+        current = best.get(user_id)
+        if current is None or candidate.similarity > current.similarity:
+            best[user_id] = candidate
+        elif (
+            candidate.similarity == current.similarity
+            and str(candidate.volunteer.profile_id) < str(current.volunteer.profile_id)
+        ):
+            best[user_id] = candidate
+    return list(best.values())
 
 
 def _unit(value: float) -> float:

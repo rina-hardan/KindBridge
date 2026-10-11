@@ -240,11 +240,16 @@ class RequestCommandHandlers:
                     task_assignments.c.volunteer_id,
                 ).where(task_assignments.c.id == assignment_id)
             ).first()
-            profile_id = None if row is None else self._users.volunteer_profile_id(conn, actor_id)
+            owns = (
+                False
+                if row is None
+                else self._users.owns_volunteer_profile(conn, actor_id, row.volunteer_id)
+            )
         if row is None:
             raise NotFound("Assignment was not found")
-        if profile_id is None or row.volunteer_id != profile_id:
+        if not owns:
             raise Forbidden("Your role cannot perform this action")
+        profile_id = row.volunteer_id
         request = self._load(row.request_id)
         if request.status != "ASSIGNED" or request.assigned_assignment_id != assignment_id:
             raise DomainError("This task is not assigned")

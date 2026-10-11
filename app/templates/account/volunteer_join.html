@@ -1,12 +1,12 @@
 {% extends "base.html" %}
-{% block title %}{{ t("volunteer.availability_title") if profile else t("volunteer.add_title") }} · KindBridge{% endblock %}
+{% block title %}{{ t("volunteer.edit_title") if profile else t("volunteer.add_title") }} · KindBridge{% endblock %}
 {% block content %}
-<div class="row justify-content-center">
-  <div class="col-12 col-lg-8">
+<div class="row g-4 align-items-start">
+  <div class="col-lg-8">
     <div class="card border-0 shadow-sm mb-4">
       <div class="card-body p-4">
-        <h1 class="h4 mb-1">{{ t("volunteer.availability_title") if profile else t("volunteer.add_title") }}</h1>
-        <p class="text-body-secondary small mb-4">{{ t("volunteer.availability_lead") if profile else t("volunteer.lead") }}</p>
+        <h1 class="h4 mb-1">{{ t("volunteer.edit_title") if profile else t("volunteer.add_title") }}</h1>
+        <p class="text-body-secondary small mb-4">{{ t("volunteer.edit_lead") if profile else t("volunteer.lead") }}</p>
         {% if period_error %}
         <div class="alert alert-danger" role="alert">{{ period_error }}</div>
         {% endif %}
@@ -114,31 +114,60 @@
     </div>
     {% endif %}
   </div>
+  <aside class="col-lg-4">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body p-4">
+        <h2 class="h5 mb-3">{{ t("tasks.wanted_title") }}</h2>
+        {% if offers %}
+        {% for offer in offers %}
+        <article class="{% if not loop.last %}mb-3 pb-3 border-bottom{% endif %}">
+          <p class="mb-2" dir="auto">{{ offer.experience }}</p>
+          <p class="text-body-secondary small mb-1">{{ t("volunteer." + offer.base_frequency|lower) }}</p>
+          {% if offer.has_vehicle %}
+          <p class="text-body-secondary small mb-2">{{ t("volunteer.vehicle") }}</p>
+          {% endif %}
+          {% if not profile or offer.profile_id != profile.profile_id %}
+          <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('account.volunteer_edit_page', profile_id=offer.profile_id) }}">{{ t("tasks.offer_edit") }}</a>
+          {% endif %}
+        </article>
+        {% endfor %}
+        {% else %}
+        <p class="text-body-secondary mb-0">{{ t("tasks.wanted_empty") }}</p>
+        {% endif %}
+      </div>
+    </div>
+  </aside>
 </div>
 {% endblock %}
 {% block scripts %}
 <script>
   const creating = {{ "false" if profile else "true" }};
+  const profileId = {{ profile.profile_id|tojson if profile else "null" }};
   const form = document.getElementById("volunteer-form");
 
-  KB.bindForm("volunteer-form", creating ? "/api/me/volunteer" : "/api/profile", (current) => ({
-    has_vehicle: current.has_vehicle.checked,
-    experience: current.experience.value,
-    base_frequency: current.base_frequency.value,
-  }), async () => {
+  KB.bindForm("volunteer-form", creating ? "/api/me/volunteer" : "/api/profile", (current) => {
+    const body = {
+      has_vehicle: current.has_vehicle.checked,
+      experience: current.experience.value,
+      base_frequency: current.base_frequency.value,
+    };
+    if (!creating) body.profile_id = profileId;
+    return body;
+  }, async (saved) => {
     if (creating && (form.from_date.value || form.until_date.value)) {
       const period = await KB.post("/api/me/unavailability", {
+        profile_id: saved.profile_id,
         from_date: form.from_date.value,
         until_date: form.until_date.value,
         reason: form.reason.value,
       });
       if (!period.ok) {
         const message = period.data.message || window.KB_TEXT.genericError;
-        window.location.href = "/me/volunteer?period_error=" + encodeURIComponent(message);
+        window.location.href = "/me/volunteer/" + saved.profile_id + "?period_error=" + encodeURIComponent(message);
         return;
       }
     }
-    window.location.href = "/me/volunteer";
+    window.location.href = creating ? "/me/tasks" : window.location.pathname;
   });
 
   const periodForm = document.getElementById("period-form");
@@ -152,13 +181,14 @@
     const button = periodForm.querySelector('button[type="submit"]');
     button.disabled = true;
     const result = await KB.post("/api/me/unavailability", {
+      profile_id: profileId,
       from_date: periodForm.from_date.value,
       until_date: periodForm.until_date.value,
       reason: periodForm.reason.value,
     });
     button.disabled = false;
     if (result.ok) {
-      window.location.href = "/me/volunteer";
+      window.location.href = window.location.pathname;
       return;
     }
     const fields = result.data.fields || {};
@@ -182,7 +212,7 @@
       button.disabled = true;
       const result = await KB.post("/api/me/unavailability/" + button.dataset.cancelPeriod + "/cancel", {});
       if (result.ok) {
-        window.location.href = "/me/volunteer";
+        window.location.href = window.location.pathname;
         return;
       }
       button.disabled = false;

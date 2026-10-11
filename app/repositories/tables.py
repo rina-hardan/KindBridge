@@ -61,7 +61,7 @@ volunteer_profiles = Table(
     "volunteer_profiles",
     metadata,
     Column("id", Uuid, primary_key=True),
-    Column("user_id", Uuid, nullable=False, unique=True),
+    Column("user_id", Uuid, nullable=False, index=True),
     Column("is_enabled", Boolean, nullable=False, default=True),
     Column("primary_city", Unicode(100), nullable=False),
     Column("has_vehicle", Boolean, nullable=False, default=False),
