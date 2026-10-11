@@ -3,7 +3,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import date
 
-from sqlalchemy import Connection, exists, func, select, true
+from sqlalchemy import Connection, case, exists, false, func, select, true
 
 from app.repositories.requests import as_date
 from app.repositories.tables import (
@@ -75,11 +75,18 @@ class UserRepository:
     """Read access to the users projection for authentication decisions."""
 
     def get_auth_record(self, conn: Connection, email: str) -> AuthRecord | None:
-        has_enabled = exists(
-            select(volunteer_profiles.c.id).where(
-                volunteer_profiles.c.user_id == users.c.id,
-                volunteer_profiles.c.is_enabled == true(),
-            )
+        # SQL Server rejects a bare EXISTS in the select list; CASE is valid on both dialects.
+        has_enabled = case(
+            (
+                exists(
+                    select(volunteer_profiles.c.id).where(
+                        volunteer_profiles.c.user_id == users.c.id,
+                        volunteer_profiles.c.is_enabled == true(),
+                    )
+                ),
+                true(),
+            ),
+            else_=false(),
         )
         stmt = select(
             users.c.id,

@@ -522,7 +522,7 @@ _CATALOG = {
         "volunteer.edit_title": "פרופיל מתנדב",
         "volunteer.edit_lead": "עדכון איך אפשר לעזור, או סימון תאריכים שבהם אי אפשר.",
         "volunteer.availability": "זמינות",
-        "volunteer.save": "שמירת פרופיל",
+        "volunteer.save": "שמור",
         "volunteer.saved": "הפרופיל נשמר.",
         "volunteer.away_title": "תאריכים שבהם אי אפשר לעזור",
         "volunteer.away_lead": "בקשה שהתאריך שלה נופל בתוך אחת התקופות האלה לא תוצע לך.",

@@ -156,6 +156,7 @@ def test_volunteer_area_opens_before_a_profile_exists(client, engine):
     assert form.status_code == 200
     text = form.data.decode()
     assert "הוספת התנדבות" in text
+    assert ">שמור</button>" in text
     assert "תחום ההתנדבות" in text
     assert "יש רכב" in text
     assert "באיזו תדירות" in text
