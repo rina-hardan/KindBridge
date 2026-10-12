@@ -176,6 +176,35 @@ def test_admin_detail_shows_score_rationale_and_contact(app, client):
     assert f'value="{profile_id}"' in body
 
 
+def test_admin_detail_explains_a_match_in_plain_hebrew(app, client):
+    requester = register(client, REQUESTER)
+    requester_id = requester.get_json()["user_id"]
+    register(client, VOLUNTEER)
+    enabled = _enable(client, VOLUNTEER_PROFILE)
+    profile_id = enabled.get_json()["profile_id"]
+    request_id = uuid4()
+    _append(app, request_id, 0, "HelpRequestCreated", _created_payload(requester_id), 1)
+    _propose(
+        app,
+        request_id,
+        profile_id,
+        uuid4(),
+        rationale=(
+            "similarity and skills lead the score. "
+            "Travel: Remote work; distance is not required. web_lookup=skipped"
+        ),
+    )
+    _login_admin(app, client)
+
+    body = client.get(f"/requests/{request_id}").data.decode()
+
+    assert "מה שהכי השפיע על הציון: התאמה לניסיון של המתנדב, וכישורים מתאימים." in body
+    assert "אפשר לעזור מרחוק, בלי להגיע." in body
+    assert "לא בדקנו עדכונים על העיר." in body
+    assert "web_lookup" not in body
+    assert "similarity" not in body.lower()
+
+
 def test_no_match_shows_summary_without_candidate_cards(app, client):
     requester = register(client, REQUESTER)
     requester_id = requester.get_json()["user_id"]

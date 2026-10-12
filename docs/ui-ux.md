@@ -15,7 +15,7 @@ Goal: professional, calm civic-ops UI (not a marketing landing page). Screen cop
 - Status badges with a fixed color per status: `PENDING_REVIEW`, `MATCH_PROPOSED`, `NO_MATCH`, `ASSIGNED`, `COMPLETED`, `CANCELLED`. Add an `OVERDUE` badge when `preferred_date` is in the past on an open request.
 - Tables: zebra optional, sticky header, pagination (20 rows), empty state with a single CTA.
 - Forms: inline validation; never clear the form on 400; field-level error messages.
-- AI scores: numeric + short rationale + top score components; no raw chain-of-thought.
+- AI scores: numeric + short rationale + top score components; no raw chain-of-thought. On `/requests/<id>` the admin card phrases the stored rationale in the active screen language: the two strongest parts, travel, and whether the city check ran. The raw `web_lookup` token is not shown.
 - Address and phone: masked `••••` until the viewer is allowed (assigned volunteer or admin).
 - Every action shows feedback (success toast or error message) and a loading state on the button while the request runs.
 
@@ -65,7 +65,7 @@ Goal: professional, calm civic-ops UI (not a marketing landing page). Screen cop
 | :--- | :--- | :--- |
 | `/dashboard` | 4.4 | KPIs: counts by request status; bar/list of **candidate count per open request**; volunteer gauges Available/Busy/Inactive |
 | `/requests` | 4.1 + 4.3 | Global search/filter table |
-| `/requests/<id>` | 4.2 | Three proposed cards (score, rationale, top components, city); Approve on one; Reject all (with reason); Override picker; Retrigger. After ASSIGNED: assigned volunteer details and Cancel |
+| `/requests/<id>` | 4.2 | Three proposed cards (score, plain-language rationale, top components, city); Approve on one; Reject all (with reason); Override picker; Retrigger. After ASSIGNED: assigned volunteer details and Cancel |
 
 Empty `NO_MATCH`: banner “No eligible volunteers” + Retrigger + Override.
 

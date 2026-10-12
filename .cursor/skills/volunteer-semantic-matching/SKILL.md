@@ -52,7 +52,7 @@ If `preferred_date` is before today, multiply by 0.85. The score is computed by 
 ## 4. Role of the LLM
 
 - Interprets Tavily results (is travel unsafe today?).
-- Writes the `ai_rationale` (max 500 characters): top two score components, travel summary, and `web_lookup=ok|skipped`.
+- Writes the `ai_rationale` (max 500 characters) in simple Hebrew: top two score components, travel summary, and `web_lookup=ok|skipped`. A reply that is not Hebrew keeps the English template. The admin screen phrases it in the screen language and does not show the raw token.
 - Never outputs raw chain-of-thought and never changes the numeric score.
 
 ## 5. Invariants

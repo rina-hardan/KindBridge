@@ -7,6 +7,7 @@ NoMatchFound and does not approve or assign.
 """
 
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Protocol
@@ -129,11 +130,19 @@ class TemplateRationale:
         return render_rationale(components, travel_note, web_lookup)
 
 
+_STORED_LOOKUP = re.compile(r"\s*web_lookup=(?:ok|skipped)\b")
+
+
+def _has_hebrew(text: str) -> bool:
+    return any("\u0590" <= char <= "\u05FF" for char in text)
+
+
 class FallbackRationale:
-    """Ask the LLM to phrase the rationale. Keep the template when the call fails.
+    """Ask the LLM for a plain Hebrew explanation. Keep the template when that fails.
 
     The numeric score is already fixed before this runs. Nothing in the model
-    reply is parsed back into the score.
+    reply is parsed back into the score. The stored text still ends with
+    ``web_lookup=ok|skipped`` so the screen can phrase that fact in words.
     """
 
     def __init__(self, client, template: TemplateRationale | None = None) -> None:
@@ -144,17 +153,21 @@ class FallbackRationale:
         draft = self._template.write(components, travel_note, web_lookup)
         try:
             text = self._client.complete(
-                "Write a match rationale of at most 500 characters. Use the draft. "
-                f"Keep web_lookup={web_lookup}. Do not change the numeric score.\n{draft}",
+                "Rewrite the draft as one or two short sentences in simple, clear Hebrew "
+                "for an admin. Use only facts from the draft: the two strongest reasons "
+                "and the travel note. Do not mention a numeric score, chain-of-thought, "
+                "or the words web_lookup. At most 500 characters.\n"
+                + draft,
                 timeout=10,
             )
         except Exception:
             logger.exception("llm_rationale_failed")
             return draft
-        cleaned = " ".join(str(text).split())
-        if not cleaned or "web_lookup=" not in cleaned:
+        cleaned = _STORED_LOOKUP.sub("", " ".join(str(text).split())).strip()
+        if not cleaned or not _has_hebrew(cleaned):
             return draft
-        return cleaned[:500]
+        suffix = f" web_lookup={web_lookup}"
+        return f"{cleaned[: 500 - len(suffix)].rstrip()}{suffix}"
 
 
 class _LlmSafety:

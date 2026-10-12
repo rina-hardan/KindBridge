@@ -725,3 +725,44 @@ def test_hard_filter_rules_and_score_formula():
     assert skill_overlap(("נהיגה", "עזרה ראשונה"), ("driving", "first aid")) == 1
     assert skill_overlap(("בישול",), ("driving",)) == 0
     assert calculate_travel_context("חיפה", "Haifa", "PHYSICAL_PRESENCE")["feasibility"] == 1
+
+
+def test_hebrew_rationale_is_kept_and_shown_without_the_lookup_token():
+    from app.commands.match_commands import FallbackRationale
+    from app.i18n import explain_rationale_in
+
+    class Chat:
+        def __init__(self, reply: str) -> None:
+            self.reply = reply
+
+        def complete(self, prompt: str, timeout: float = 10.0) -> str:
+            return self.reply
+
+    parts = {
+        "similarity": 0.4,
+        "skills": 0.2,
+        "travel": 0.15,
+        "urgency": 0.07,
+        "vehicle": 0.05,
+        "frequency": 0.05,
+    }
+    stored = FallbackRationale(Chat("המתנדב מתאים לבקשה ואפשר לעזור מרחוק.")).write(
+        parts, "Remote work; distance is not required.", "skipped"
+    )
+    assert stored == "המתנדב מתאים לבקשה ואפשר לעזור מרחוק. web_lookup=skipped"
+    shown = explain_rationale_in("he", stored)
+    assert shown == "המתנדב מתאים לבקשה ואפשר לעזור מרחוק. לא בדקנו עדכונים על העיר."
+
+    fallback = FallbackRationale(Chat("Similarity leads. web_lookup=ok")).write(parts, "Same city.", "ok")
+    assert fallback.startswith("similarity and skills lead the score.")
+    assert explain_rationale_in("he", fallback) == (
+        "מה שהכי השפיע על הציון: התאמה לניסיון של המתנדב, וכישורים מתאימים. "
+        "המתנדב באותה עיר. בדקנו עדכונים על העיר."
+    )
+    unsafe = (
+        "travel and urgency lead the score. "
+        "Travel: About 12.5 km apart. Travel looks unsafe today. web_lookup=ok"
+    )
+    assert "המרחק הוא בערך 12.5 ק״מ." in explain_rationale_in("he", unsafe)
+    assert "הנסיעה היום נראית לא בטוחה." in explain_rationale_in("he", unsafe)
+    assert explain_rationale_in("en", "Nearby and can drive") == "Nearby and can drive"

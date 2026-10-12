@@ -39,7 +39,7 @@ HITL: graph **stops** after writing proposals. Approve/reject is only HTTP/admin
 The score is computed by deterministic code (section 3), never by the LLM. The LLM is used for exactly two things:
 
 1. Interpret the Tavily result and return `unsafe_travel: true|false` (structured JSON output).
-2. Write the `ai_rationale` text (max 500 chars) from the already-computed score components.
+2. Write the `ai_rationale` text (max 500 chars) in simple Hebrew from the already-computed score components. The stored text still ends with `web_lookup=ok|skipped`. If the reply is empty or not Hebrew, keep the English template. The admin request screen phrases either form in the viewer's language and does not show the raw token.
 
 The LLM never ranks candidates, never changes a score, and never dispatches commands; the graph does.
 
@@ -53,7 +53,7 @@ Model configuration (environment variables, documented in `.env.example`):
 
 The chosen provider and model must be written in the project `README.md`.
 
-If the LLM call fails or exceeds 10s: use a template rationale (top two score components + travel summary) and `unsafe_travel = false`. A failed LLM call never blocks proposals.
+If the LLM call fails, exceeds 10s, or does not return Hebrew: use a template rationale (top two score components + travel summary) and `unsafe_travel = false`. A failed LLM call never blocks proposals.
 
 ## 3. Score formula (`ai_score` 0-100)
 
@@ -68,7 +68,7 @@ score = 100 * (
 )
 ```
 
-If `preferred_date` < today: multiply by `0.85`. Rationale <= 500 chars: top two score components + travel summary + `web_lookup=ok|skipped`.
+If `preferred_date` < today: multiply by `0.85`. Rationale <= 500 chars: top two score components + travel summary + `web_lookup=ok|skipped`. The model phrases that in simple Hebrew; the English template is the fallback. The admin screen shows the same facts in the viewer's language.
 
 Chroma returns cosine **distance**. Convert with `clip(1 - distance, 0, 1)` and feed that into the formula. Persist the 0–100 score. Never persist the distance, and never let the LLM replace the number.
 

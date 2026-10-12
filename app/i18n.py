@@ -671,6 +671,105 @@ def translate_to(lang: str, key: str) -> str:
     return catalog.get(key) or _CATALOG["en"].get(key) or key
 
 
+_RATIONALE_TEMPLATE = re.compile(
+    r"^(?P<first>similarity|skills|travel|urgency|vehicle|frequency) and "
+    r"(?P<second>similarity|skills|travel|urgency|vehicle|frequency) "
+    r"lead the score\. Travel: (?P<travel>.*?) web_lookup=(?P<lookup>ok|skipped)$"
+)
+_LOOKUP_TOKEN = re.compile(r"\s*web_lookup=(ok|skipped)\b")
+_KM_APART = re.compile(r"^About ([0-9]+(?:\.[0-9]+)?) km apart\.$")
+_UNSAFE_TRAVEL = "Travel looks unsafe today."
+_SCORE_PARTS = {
+    "he": {
+        "similarity": "התאמה לניסיון של המתנדב",
+        "skills": "כישורים מתאימים",
+        "travel": "קרבה לעיר",
+        "urgency": "דחיפות הבקשה",
+        "vehicle": "רכב כשצריך",
+        "frequency": "תדירות מתאימה",
+    },
+    "en": {
+        "similarity": "a match with the volunteer's experience",
+        "skills": "matching skills",
+        "travel": "living nearby",
+        "urgency": "how urgent the request is",
+        "vehicle": "having a vehicle when one is needed",
+        "frequency": "a matching schedule",
+    },
+}
+_CITY_CHECK = {
+    "he": {"ok": "בדקנו עדכונים על העיר.", "skipped": "לא בדקנו עדכונים על העיר."},
+    "en": {"ok": "City updates were checked.", "skipped": "City updates were not checked."},
+}
+
+
+def explain_rationale(text: str | None) -> str:
+    """Plain-language match explanation for the admin request screen."""
+    if text is None or not str(text).strip():
+        return ""
+    return explain_rationale_in(current_lang(), str(text).strip())
+
+
+def explain_rationale_in(lang: str, text: str) -> str:
+    """Same explanation in a fixed language. `he` is the default screen language."""
+    chosen = "en" if lang == "en" else "he"
+    match = _RATIONALE_TEMPLATE.match(text.strip())
+    if match is not None:
+        return _rationale_from_template(chosen, match)
+    return _LOOKUP_TOKEN.sub(lambda found: " " + _CITY_CHECK[chosen][found.group(1)], text).strip()
+
+
+def _rationale_from_template(lang: str, match: re.Match[str]) -> str:
+    first = _SCORE_PARTS[lang][match.group("first")]
+    second = _SCORE_PARTS[lang][match.group("second")]
+    travel = _travel_sentence(lang, match.group("travel"))
+    lookup = _CITY_CHECK[lang][match.group("lookup")]
+    if lang == "he":
+        lead = f"מה שהכי השפיע על הציון: {first}, ו{second}."
+    else:
+        lead = f"What affected the score most: {first}, and {second}."
+    return f"{lead} {travel} {lookup}"
+
+
+def _travel_sentence(lang: str, note: str) -> str:
+    text = " ".join(note.split())
+    unsafe = text.endswith(_UNSAFE_TRAVEL)
+    if unsafe:
+        text = text[: -len(_UNSAFE_TRAVEL)].strip()
+    sentence = _travel_base(lang, text)
+    if not unsafe:
+        return sentence
+    extra = "הנסיעה היום נראית לא בטוחה." if lang == "he" else "Travel looks unsafe today."
+    return f"{sentence} {extra}"
+
+
+def _travel_base(lang: str, text: str) -> str:
+    distance = _KM_APART.fullmatch(text)
+    if lang == "he":
+        if text == "Remote work; distance is not required.":
+            return "אפשר לעזור מרחוק, בלי להגיע."
+        if text == "Same city.":
+            return "המתנדב באותה עיר."
+        if text == "Different city.":
+            return "המתנדב בעיר אחרת."
+        if text in ("", "no travel note"):
+            return "אין פרטים על הנסיעה."
+        if distance:
+            return f"המרחק הוא בערך {distance.group(1)} ק״מ."
+        return text if text.endswith((".", "!", "?")) else f"{text}."
+    if text == "Remote work; distance is not required.":
+        return "They can help remotely, without coming in person."
+    if text == "Same city.":
+        return "The volunteer is in the same city."
+    if text == "Different city.":
+        return "The volunteer is in a different city."
+    if text in ("", "no travel note"):
+        return "There are no travel details."
+    if distance:
+        return f"The distance is about {distance.group(1)} km."
+    return text if text.endswith((".", "!", "?")) else f"{text}."
+
+
 def localize(message: str) -> str:
     """Turn a stored English failure into Hebrew when the screen language is Hebrew."""
     if current_lang() != "he":
