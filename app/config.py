@@ -95,7 +95,8 @@ class Config:
     llm_model: str = ""
     ollama_base_url: str = "http://localhost:11434"
     openai_api_key: str = ""
-    tavily_api_key: str = ""
+    # The Tavily key is forwarded only as the child process environment. Keep it out of repr().
+    tavily_api_key: str = field(default="", repr=False)
     # Gmail notifications. The client id and secret stay out of repr() so a logged Config never leaks them.
     mail_enabled: bool = False
     gmail_client_id: str = field(default="", repr=False)

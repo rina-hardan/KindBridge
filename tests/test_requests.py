@@ -549,6 +549,30 @@ def test_admin_cannot_submit(app):
     assert submit(client).status_code == 403
 
 
+def test_request_screens_show_a_street_address_instead_of_an_email(app, client):
+    requester = register(client, REQUESTER)
+    save_requester(client, dict(REQUESTER_PROFILE, default_address="dana@example.com"))
+    request_id = uuid4()
+    _append(
+        app,
+        request_id,
+        0,
+        "HelpRequestCreated",
+        _created_payload(requester.get_json()["user_id"], address="dana@example.com"),
+        1,
+    )
+
+    form = client.get("/me/requests/new")
+    detail = client.get(f"/requests/{request_id}")
+
+    assert b'autocomplete="street-address"' in form.data
+    assert "כתובת פיזית".encode() in form.data
+    assert b'value="12 Herzl Street"' in form.data
+    assert b"dana@example.com" not in form.data
+    assert "12 Herzl Street" in detail.data.decode()
+    assert "dana@example.com" not in detail.data.decode()
+
+
 def test_new_request_page_is_prefilled_from_the_profile(client):
     enroll(client)
 

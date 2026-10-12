@@ -29,7 +29,7 @@ from app.infrastructure.notification_service import (
 )
 from app.infrastructure.notifier import GmailMcpNotifier, Notifier, NullNotifier, build_notifier
 from app.infrastructure.vector_store import ChromaVolunteerVectorStore, NullResumeIndex, ResumeVectorStore
-from app.infrastructure.web_search import TavilySearch
+from app.infrastructure.web_search import build_web_search
 from app.projections.exemption_projector import ExemptionProjector
 from app.projections.match_projector import MatchProjector
 from app.projections.projectors import UserProjector
@@ -115,7 +115,7 @@ def build_services(
         projector=MatchProjector(),
         resumes=resumes,
         clock=clock,
-        web=TavilySearch(config.tavily_api_key) if config.tavily_api_key and not config.testing else None,
+        web=build_web_search(config),
         safety=_LlmSafety(chat) if chat is not None else None,
         rationale=FallbackRationale(chat) if chat is not None else TemplateRationale(),
         sleep=(lambda _seconds: None) if config.testing else time.sleep,

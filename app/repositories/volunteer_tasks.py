@@ -9,6 +9,7 @@ from collections.abc import Sequence
 from sqlalchemy import case, func, select
 from sqlalchemy.engine import Engine
 
+from app.repositories.request_read import physical_address
 from app.repositories.requests import as_date
 from app.repositories.tables import help_requests, task_assignments, users, volunteer_profiles
 
@@ -70,6 +71,7 @@ class VolunteerTaskRepository:
                     help_requests.c.address,
                     users.c.full_name,
                     users.c.phone,
+                    users.c.home_address,
                 )
                 .select_from(source.join(users, users.c.id == help_requests.c.requester_id))
                 .where(*scope)
@@ -91,7 +93,7 @@ class VolunteerTaskRepository:
                     preferred_date=as_date(row.preferred_date),
                     description=row.description,
                     requester_name=row.full_name,
-                    address=row.address,
+                    address=physical_address(row.address, row.home_address),
                     phone_encrypted=row.phone,
                 )
                 for row in rows

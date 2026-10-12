@@ -127,6 +127,7 @@ class RequestReadRepository:
                     users.c.phone,
                     help_requests.c.city,
                     help_requests.c.address,
+                    users.c.home_address,
                     help_requests.c.category,
                     help_requests.c.urgency,
                     help_requests.c.description,
@@ -144,7 +145,7 @@ class RequestReadRepository:
                 requester_name=row.full_name,
                 phone_encrypted=row.phone,
                 city=row.city,
-                address=row.address,
+                address=physical_address(row.address, row.home_address),
                 category=row.category,
                 urgency=row.urgency,
                 description=row.description,
@@ -235,6 +236,15 @@ class RequestReadRepository:
             except (TypeError, ValueError):
                 continue
         return counts
+
+
+def physical_address(stored: str | None, home: str | None) -> str:
+    """A help-request screen shows a street address. An e-mail is replaced by the home address."""
+    text = stored or ""
+    residence = (home or "").strip()
+    if "@" in text and residence and "@" not in residence:
+        return residence
+    return text
 
 
 def _list_row(row) -> RequestListRow:

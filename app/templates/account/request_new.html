@@ -87,8 +87,8 @@
               <div class="invalid-feedback" data-field="city"></div>
             </div>
             <div class="col-md-6">
-              <label class="form-label" for="address">{{ t("requester.address") }}</label>
-              <input id="address" name="address" class="form-control" value="{{ defaults.address }}" dir="auto" required aria-describedby="address-help">
+              <label class="form-label" for="address">{{ t("request.address") }}</label>
+              <input id="address" name="address" class="form-control" value="{{ defaults.address }}" autocomplete="street-address" dir="auto" required aria-describedby="address-help">
               <div id="address-help" class="form-text">{{ t("requests.address_help") }}</div>
               <div class="invalid-feedback" data-field="address"></div>
             </div>

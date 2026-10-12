@@ -1,12 +1,16 @@
 """ProposeMatchCommand: retrieve 15, hard-filter, score, write the event."""
 
 import json
+import logging
+import sys
 from datetime import datetime, time
+from pathlib import Path
 from uuid import uuid4
 
 from sqlalchemy import insert, select
 
 from app.commands.match_commands import MatchCommandHandlers, ProposeMatchCommand
+from app.infrastructure.web_search import TavilySearch
 from app.domain.events import DomainEvent
 from app.domain.matching import (
     EXCLUSIVE,
@@ -338,6 +342,63 @@ def test_empty_pool_writes_no_match_with_rejection_summary(engine, clock):
     assert found.payload["reason"] == "no_eligible_volunteers"
     assert found.payload["rejection_summary"] == {}
     assert found.payload["match_attempt"] == 0
+
+
+def _tavily_search(tmp_path, mode="ok", timeout=30.0):
+    calls = tmp_path / "tavily-calls.jsonl"
+    server = Path(__file__).with_name("fake_tavily_mcp_server.py")
+    search = TavilySearch(
+        "tvly-test-secret",
+        timeout=timeout,
+        launch=lambda: (sys.executable, [str(server), str(calls), mode]),
+    )
+    return search, calls
+
+
+def test_tavily_mcp_is_called_with_the_city_query(engine, clock, tmp_path):
+    requester = uuid4()
+    request_id = uuid4()
+    with engine.begin() as conn:
+        _user(conn, requester, "requester@example.com")
+        profile_id = _volunteer(conn)[1]
+    _open_request(engine, request_id, requester)
+    search, calls = _tavily_search(tmp_path)
+
+    result = _propose(_handler(engine, clock, Catalog([_hit(profile_id)]), web=search), request_id)
+
+    recorded = [json.loads(line) for line in calls.read_text(encoding="utf-8").splitlines()]
+    _request, assignments, _events = _rows(engine, request_id)
+    assert result.outcome == "proposed"
+    assert recorded == [
+        {
+            "arguments": {"query": "Haifa transit disruption OR municipal emergency 2026-10-06"},
+            "has_api_key_env": True,
+        }
+    ]
+    assert "tvly-test-secret" not in calls.read_text(encoding="utf-8")
+    assert float(assignments[0]["ai_score"]) == 100.0
+    assert "web_lookup=ok" in assignments[0]["ai_rationale"]
+
+
+def test_tavily_mcp_exception_still_proposes_with_skipped_lookup(engine, clock, tmp_path, caplog):
+    requester = uuid4()
+    request_id = uuid4()
+    with engine.begin() as conn:
+        _user(conn, requester, "requester@example.com")
+        profile_id = _volunteer(conn)[1]
+    _open_request(engine, request_id, requester)
+    search, calls = _tavily_search(tmp_path, mode="fail")
+
+    with caplog.at_level(logging.ERROR):
+        result = _propose(_handler(engine, clock, Catalog([_hit(profile_id)]), web=search), request_id)
+
+    _request, assignments, _events = _rows(engine, request_id)
+    assert result.outcome == "proposed"
+    assert float(assignments[0]["ai_score"]) == 100.0
+    assert "web_lookup=skipped" in assignments[0]["ai_rationale"]
+    assert "tvly-test-secret" not in caplog.text
+    recorded = [json.loads(line) for line in calls.read_text(encoding="utf-8").splitlines()]
+    assert recorded[0]["arguments"]["query"] == "Haifa transit disruption OR municipal emergency 2026-10-06"
 
 
 def test_tavily_failure_still_proposes_with_skipped_lookup(engine, clock):

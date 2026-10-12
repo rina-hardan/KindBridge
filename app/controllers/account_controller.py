@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date
 from uuid import UUID
 
@@ -18,6 +19,7 @@ from app.i18n import localize
 from app.queries.account_queries import AccountView, GetMyAccountQuery, GetMyProfilesQuery
 from app.queries.request_queries import GetRequesterDefaultsQuery
 from app.queries.volunteer_queries import GetVolunteerTasksQuery
+from app.repositories.request_read import physical_address
 from app.repositories.users import UserRepository
 from app.repositories.volunteer_tasks import VolunteerTaskRepository
 from app.security.auth import current_identity, require_auth, set_access_cookie
@@ -210,6 +212,7 @@ def new_request_page():
     defaults = GetRequesterDefaultsQuery(_services().engine, UserRepository()).execute(account.user_id)
     if defaults is None:
         return redirect(url_for("account.requester_join_page"))
+    defaults = replace(defaults, address=physical_address(defaults.address, account.home_address))
     return render_template(
         "account/request_new.html",
         defaults=defaults,

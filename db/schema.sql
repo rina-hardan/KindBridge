@@ -162,6 +162,7 @@ CREATE TABLE dbo.help_requests (
     resource_type NVARCHAR(30) NOT NULL, -- PHYSICAL_PRESENCE, EQUIPMENT_LOAN, FLEXIBLE_REMOTE
     description NVARCHAR(MAX) NOT NULL,
     urgency NVARCHAR(20) NOT NULL, -- LOW, NORMAL, HIGH, EMERGENCY
+    frequency NVARCHAR(30) NOT NULL CONSTRAINT DF_help_requests_frequency DEFAULT 'ON_DEMAND', -- ON_DEMAND, WEEKLY, BIWEEKLY, MONTHLY
     preferred_date DATE NULL,
     preferred_time_from TIME NULL,
     preferred_time_to TIME NULL,
@@ -173,6 +174,10 @@ CREATE TABLE dbo.help_requests (
     match_attempt INT NOT NULL DEFAULT 0,
     created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
 );
+
+-- Older databases were created before cadence was stored. Existing rows stay one-off.
+IF COL_LENGTH(N'dbo.help_requests', N'frequency') IS NULL
+    ALTER TABLE dbo.help_requests ADD frequency NVARCHAR(30) NOT NULL CONSTRAINT DF_help_requests_frequency DEFAULT 'ON_DEMAND';
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_help_requests_status' AND object_id = OBJECT_ID(N'dbo.help_requests'))
 CREATE INDEX IX_help_requests_status ON dbo.help_requests(status);
