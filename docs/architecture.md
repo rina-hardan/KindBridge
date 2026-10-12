@@ -185,11 +185,13 @@ There is no request-update route. Replacing a ticket means cancel, then submit a
 
 `category` is a closed list: `errands`, `transport`, `shopping`, `companionship`, `home_help`, `childcare`, `tutoring`, `translation`, `first_aid`.
 
-`resource_type`: `PHYSICAL_PRESENCE`, `EQUIPMENT_LOAN`, `FLEXIBLE_REMOTE`.
+`resource_type`: `UNKNOWN` at submit, then `PHYSICAL_PRESENCE`, `EQUIPMENT_LOAN`, or `FLEXIBLE_REMOTE` after `ResourceTypeClassified`. The form does not send it.
 
 `urgency`: `LOW`, `NORMAL`, `HIGH`, `EMERGENCY`.
 
-`required_skills` uses the same Hebrew/English skill vocabulary as volunteer résumés (`app/domain/bilingual.py`). Values are stored as that vocabulary's canonical key.
+`frequency`: `ON_DEMAND`, `WEEKLY`, `BIWEEKLY`, `MONTHLY`. Required on the create form.
+
+`required_skills` is not collected. New tickets store `[]`.
 | POST | `/api/requests/<id>/approve` | ADMIN | `ApproveAssignmentCommand` |
 | POST | `/api/requests/<id>/reject` | ADMIN | `RejectAssignmentCommand` |
 | POST | `/api/requests/<id>/override` | ADMIN | `OverrideAssignmentCommand` |

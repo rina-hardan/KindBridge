@@ -20,7 +20,9 @@ from app.domain.matching import (
     UnavailabilityPeriod,
     VolunteerRecord,
     cities_match,
+    classify_resource_type,
     default_concurrency,
+    frequency_fit,
     is_self_assignment,
     rank_proposals,
     rejection_reason,
@@ -273,6 +275,7 @@ def test_three_eligible_volunteers_are_proposed(engine, clock):
     assert {event.event_type for event in events} <= {
         "HelpRequestCreated",
         "MatchesProposed",
+        "ResourceTypeClassified",
         "ConcurrencyClassified",
         "NoMatchFound",
     }
@@ -446,6 +449,33 @@ def test_unknown_concurrency_is_exclusive_for_capacity(engine, clock):
     assert found.payload["rejection_summary"] == {"capacity": 1}
 
 
+def test_unknown_delivery_is_classified_before_geography(engine, clock):
+    requester = uuid4()
+    request_id = uuid4()
+    with engine.begin() as conn:
+        _user(conn, requester, "requester@example.com")
+        profile_id = _volunteer(conn, city="Tel Aviv")[1]
+    _open_request(
+        engine,
+        request_id,
+        requester,
+        resource_type="UNKNOWN",
+        category="translation",
+        description="Translate a letter",
+        concurrency_type="UNKNOWN",
+    )
+
+    result = _propose(_handler(engine, clock, Catalog([_hit(profile_id)])), request_id)
+
+    request, assignments, events = _rows(engine, request_id)
+    assert result.outcome == "proposed"
+    assert request["resource_type"] == "FLEXIBLE_REMOTE"
+    assert request["concurrency_type"] == PARALLEL_OK
+    assert len(assignments) == 1
+    classified = next(event for event in events if event.event_type == "ResourceTypeClassified")
+    assert classified.payload["resource_type"] == "FLEXIBLE_REMOTE"
+
+
 def test_exclusive_tasks_on_the_same_date_overlap(engine, clock):
     requester = uuid4()
     request_id = uuid4()
@@ -607,6 +637,16 @@ def test_hard_filter_rules_and_score_formula():
     assert rank_proposals([zero]) == [zero]
     assert default_concurrency("FLEXIBLE_REMOTE")[0] == PARALLEL_OK
     assert default_concurrency("PHYSICAL_PRESENCE")[0] == EXCLUSIVE
+    assert classify_resource_type("transport", "Need a ride to the clinic")[0] == "PHYSICAL_PRESENCE"
+    assert classify_resource_type("translation", "Translate a letter")[0] == "FLEXIBLE_REMOTE"
+    assert classify_resource_type("errands", "השאלת כיסא גלגלים")[0] == "EQUIPMENT_LOAN"
+    assert classify_resource_type("translation", "Please come over in person")[0] == "PHYSICAL_PRESENCE"
+    assert classify_resource_type("home_help", "שיעור בזום")[0] == "FLEXIBLE_REMOTE"
+    assert frequency_fit("ON_DEMAND", "WEEKLY") == 0.9
+    assert frequency_fit("WEEKLY", "WEEKLY") == 1.0
+    assert frequency_fit("WEEKLY", "ON_DEMAND") == 0.75
+    assert frequency_fit("MONTHLY", "WEEKLY") == 0.9
+    assert frequency_fit("WEEKLY", "MONTHLY") == 0.5
 
     remote_travel = calculate_travel_context("Haifa", "Tel Aviv", "FLEXIBLE_REMOTE")
     assert remote_travel["feasibility"] == 1

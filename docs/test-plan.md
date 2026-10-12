@@ -14,7 +14,7 @@ Stack: pytest + Flask test client + SQL Server test DB or LocalDB. Agent tests m
 ## Requests and matching
 
 - Hebrew and English names of the same city pass the geography check; Hebrew and English names of the same skill count as overlap.
-- Submit creates `HelpRequestCreated` and projection `PENDING_REVIEW`. There is no update endpoint.
+- Submit creates `HelpRequestCreated` and projection `PENDING_REVIEW`. The form sends category, urgency, description, frequency, vehicle, an optional time window, city, and address. It sends a preferred date only when frequency is `ON_DEMAND`. It does not send skills, duration, or delivery mode: `required_skills` is `[]`, `estimated_duration_min` is null, and `resource_type` is `UNKNOWN` until propose classifies it. There is no update endpoint.
 - The owner's list defaults to open statuses. Cancel from `PENDING_REVIEW` sets `CANCELLED` and drops the row from that default list. Another requester canceling it receives 403.
 - Propose with three eligible volunteers writes K≤3 `PROPOSED` and status `MATCH_PROPOSED`.
 - Propose with empty pool → `NO_MATCH`.

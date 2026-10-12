@@ -79,6 +79,7 @@ class SqlMatchingReader:
             required_skills=tuple(_skills(row["required_skills_json"])),
             requires_vehicle=bool(row["requires_vehicle"]),
             concurrency_type=row["concurrency_type"],
+            frequency=row["frequency"] or "ON_DEMAND",
         )
 
     def accessibility_notes(self, conn: Connection, requester_id: UUID) -> str | None:

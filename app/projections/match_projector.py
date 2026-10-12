@@ -22,6 +22,7 @@ class MatchProjector:
     def __init__(self) -> None:
         self._handlers = {
             "HelpRequestCreated": self._on_created,
+            "ResourceTypeClassified": self._on_resource_classified,
             "ConcurrencyClassified": self._on_classified,
             "MatchesProposed": self._on_proposed,
             "NoMatchFound": self._on_no_match,
@@ -61,6 +62,7 @@ class MatchProjector:
                 resource_type=payload.get("resource_type") or "PHYSICAL_PRESENCE",
                 description=payload.get("description") or "",
                 urgency=payload.get("urgency") or "NORMAL",
+                frequency=payload.get("frequency") or "ON_DEMAND",
                 preferred_date=_date(payload.get("preferred_date")),
                 preferred_time_from=_clock_time(payload.get("preferred_time_from")),
                 preferred_time_to=_clock_time(payload.get("preferred_time_to")),
@@ -72,6 +74,14 @@ class MatchProjector:
                 match_attempt=int(payload.get("match_attempt") or 0),
                 created_at=_naive_utc(event.created_at),
             )
+        )
+
+    def _on_resource_classified(self, conn: Connection, event: DomainEvent) -> None:
+        kind = event.payload.get("resource_type")
+        if kind not in ("PHYSICAL_PRESENCE", "EQUIPMENT_LOAN", "FLEXIBLE_REMOTE"):
+            return
+        conn.execute(
+            update(help_requests).where(help_requests.c.id == event.aggregate_id).values(resource_type=str(kind))
         )
 
     def _on_classified(self, conn: Connection, event: DomainEvent) -> None:

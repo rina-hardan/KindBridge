@@ -166,21 +166,24 @@ A volunteer is excluded when the request's `preferred_date` falls inside a non-c
 | `city` | NVARCHAR(100) | Indexed, NOT NULL | Municipality |
 | `address` | NVARCHAR(255) | NOT NULL | Street address; hidden from volunteer until assignment |
 | `category` | NVARCHAR(50) | NOT NULL | Aid domain (enum in app; list defined in architecture.md) |
-| `resource_type` | NVARCHAR(30) | NOT NULL | `PHYSICAL_PRESENCE`, `EQUIPMENT_LOAN`, `FLEXIBLE_REMOTE` |
-| `description` | NVARCHAR(MAX) | NOT NULL | Narrative of need |
+| `resource_type` | NVARCHAR(30) | NOT NULL | **[CHANGED]** Not chosen on the form. `UNKNOWN` at submit, then `PHYSICAL_PRESENCE`, `EQUIPMENT_LOAN`, or `FLEXIBLE_REMOTE` after classification. See delivery below |
+| `description` | NVARCHAR(MAX) | NOT NULL | Narrative of need. The form asks for as much detail as possible, because this text is what matching embeds |
 | `urgency` | NVARCHAR(20) | NOT NULL | `LOW`, `NORMAL`, `HIGH`, `EMERGENCY` |
+| `frequency` | NVARCHAR(30) | NOT NULL | **[CHANGED]** `ON_DEMAND`, `WEEKLY`, `BIWEEKLY`, `MONTHLY`. How often this help is needed. Same values as a volunteer's `base_frequency`. Soft score only. It does not create a `request_series` |
 | `preferred_date` | DATE | NULL | Target date |
 | `preferred_time_from` | TIME | NULL | Window start |
 | `preferred_time_to` | TIME | NULL | Window end |
-| `estimated_duration_min` | INT | NULL | Duration in minutes (used when no window is given) |
-| `required_skills_json` | NVARCHAR(MAX) | NOT NULL | JSON string array |
-| `requires_vehicle` | BIT | NOT NULL, default 0 | True only if transport is required; independent of `resource_type` |
+| `estimated_duration_min` | INT | NULL | **[CHANGED]** Not collected. New tickets store null. A stored value on an older row still extends a start time that has no end |
+| `required_skills_json` | NVARCHAR(MAX) | NOT NULL | **[CHANGED]** The form does not collect skills. New tickets store `[]`. An empty list does not separate candidates |
+| `requires_vehicle` | BIT | NOT NULL, default 0 | True only if transport is required. The requester still checks this on the form. Independent of `resource_type` |
 | `concurrency_type` | NVARCHAR(20) | NOT NULL, default `UNKNOWN` | **[NEW]** `EXCLUSIVE`, `PARALLEL_OK`, `UNKNOWN`. See 4.4 |
 | `status` | NVARCHAR(30) | Indexed, NOT NULL | See request state machine |
 | `match_attempt` | INT | NOT NULL, default 0 | Incremented each ProposeMatch; used for idempotency |
 | `created_at` | DATETIME2 | NOT NULL | UTC |
 
-`requires_vehicle` is the vehicle flag. `resource_type` is how the work is delivered (on-site vs remote vs equipment). Do not duplicate `EQUIPMENT_VEHICLE`.
+`requires_vehicle` is the vehicle flag. The create form collects category, urgency, description, frequency, that checkbox, an optional time window, city, and address. A preferred date is shown only when frequency is `ON_DEMAND`; every other frequency hides it and does not submit it. The form does not collect skills, a duration, or how the help is delivered.
+
+**Delivery.** `resource_type` is how the work is delivered (on-site vs remote vs equipment). Do not duplicate `EQUIPMENT_VEHICLE`. The requester does not choose it. At the start of `ProposeMatch`, when the value is `UNKNOWN`, classify it before the geography check and before concurrency. Phrases in the description win, in this order: equipment language (`השאלה`, `ציוד`, equipment, lending) → `EQUIPMENT_LOAN`; remote language (remote, phone, zoom, `מרחוק`) → `FLEXIBLE_REMOTE`; on-site language (`להגיע`, `בבית`, in person, at home) → `PHYSICAL_PRESENCE`. Otherwise `tutoring` and `translation` lean `FLEXIBLE_REMOTE`, and every other category leans `PHYSICAL_PRESENCE`. The reason is stored on `ResourceTypeClassified`, not in a column. `UNKNOWN` is treated as on-site if a filter runs before that classification. Concurrency is then classified from the resulting resource type (4.4).
 
 ### 3.6 `request_series` [NEW] [DEFERRED]
 
@@ -288,7 +291,7 @@ flowchart LR
 | :--- | :--- | :--- | :--- | :--- |
 | - | `RegisterUserCommand` | `UserRegistered` (+ `VolunteerProfileEnabled` if the form includes a volunteer profile) | (user exists) | No role in payload. `is_admin` is never set here. `city` and `home_address` are required. The admin seed does not set them |
 | - | `LoginCommand` | `UserLoggedIn` | - | Audit only; no domain status |
-| - | `SubmitHelpRequestCommand` | `HelpRequestCreated` | `PENDING_REVIEW` | Non-admin with a requester profile; enqueue agent |
+| - | `SubmitHelpRequestCommand` | `HelpRequestCreated` | `PENDING_REVIEW` | Non-admin with a requester profile; enqueue agent. `resource_type` is `UNKNOWN`, `required_skills` is `[]`, `estimated_duration_min` is null, and `frequency` is one of the four cadence values |
 | `PENDING_REVIEW` | `ClassifyConcurrencyCommand` | `ConcurrencyClassified` | (unchanged) | **[NEW]** Agent or admin. See 4.4 |
 | `PENDING_REVIEW` | `ProposeMatchCommand` | `MatchesProposed` | `MATCH_PROPOSED` | Agent only; writes 1..K `PROPOSED` rows; increments `match_attempt`; applies the hard filter in 4.2 |
 | `PENDING_REVIEW` | `ProposeMatchCommand` (empty pool) | `NoMatchFound` | `NO_MATCH` | Admin notified; no assignment rows; payload carries the **rejection summary** (counts per filter reason) |
@@ -317,7 +320,7 @@ Stage 1 of `ProposeMatchCommand`. It runs as plain code (a SQL query / MCP tool)
 | 3 | Exemption | An `exemption_links` row exists for the volunteer user and the requester |
 | 4 | Declined before | The volunteer has a `DECLINED` assignment on this request (reject or release) |
 | 5 | Unavailability | `preferred_date` (or today) falls inside a non-cancelled `volunteer_unavailability` period |
-| 6 | Geography | `resource_type` is `PHYSICAL_PRESENCE` or `EQUIPMENT_LOAN` and the volunteer city is not the same municipality as the request city. Hebrew and English names of a known municipality match (`חיפה` and `Haifa`); hyphens and extra spaces are ignored. An unknown place matches only the same folded text. `FLEXIBLE_REMOTE` ignores city. A radius is deferred |
+| 6 | Geography | `resource_type` is `PHYSICAL_PRESENCE`, `EQUIPMENT_LOAN`, or still `UNKNOWN`, and the volunteer city is not the same municipality as the request city. Hebrew and English names of a known municipality match (`חיפה` and `Haifa`); hyphens and extra spaces are ignored. An unknown place matches only the same folded text. `FLEXIBLE_REMOTE` ignores city. A radius is deferred |
 | 7 | Vehicle | `requires_vehicle = 1` and `has_vehicle = 0` |
 | 8 | Capacity | Per the concurrency rules in 4.4 |
 | 9 | Schedule overlap | Per the concurrency rules in 4.4 |
@@ -347,7 +350,7 @@ Some tasks can run alongside others (a short phone check-in) and some cannot (ac
 - `PARALLEL_OK` request: `current_parallel_tasks < max_parallel_tasks`.
 
 **Overlap (check 9).** Two tasks of the same volunteer may overlap in time only if **both** are `PARALLEL_OK`.
-- With time windows (`preferred_time_from/to`, or `estimated_duration_min` from a start time): compare the intervals on the same date.
+- With a time window (`preferred_time_from` and `preferred_time_to`): compare the intervals on the same date. The form does not collect a duration. A stored `estimated_duration_min` on an older row still extends a start time that has no end.
 - Without a window: two `EXCLUSIVE` tasks on the same date are treated as overlapping; a `PARALLEL_OK` task is not blocked by date alone.
 
 ### 4.5 Assignment status
@@ -357,7 +360,7 @@ Some tasks can run alongside others (a short phone check-in) and some cannot (ac
 
 ### 4.6 Scoring (stage 2, soft)
 
-Only volunteers who passed 4.2 are ranked. Inputs: semantic similarity between the request text (description + requester accessibility notes) and the volunteer resume (ChromaDB); required-skill coverage (a shared Hebrew/English vocabulary, otherwise the same folded text); `base_frequency` bonus; continuity bonus (series, deferred); urgency weight; overdue penalty. Top **3** become `PROPOSED` with `ai_score` and `ai_rationale`. Details in [agent-and-mcp.md](agent-and-mcp.md).
+Only volunteers who passed 4.2 are ranked. Inputs: semantic similarity between the request text (description, category, frequency, and requester accessibility notes) and the volunteer resume (ChromaDB); required-skill coverage, which is 1 for every candidate while `required_skills_json` is `[]` and therefore does not separate them; frequency fit between the request `frequency` and the volunteer's `base_frequency` (weight 0.05, never a hard filter); continuity bonus (series, deferred); urgency weight; overdue penalty. A one-off request (`ON_DEMAND`) keeps the volunteer bonus (`ON_DEMAND` 1.0, `WEEKLY` 0.9, `BIWEEKLY` 0.8, `MONTHLY` 0.7). The same cadence is 1.0. A volunteer who can help at least that often is 0.9. An on-demand volunteer for a repeating cadence is 0.75. A less frequent volunteer is 0.5. Top **3** become `PROPOSED` with `ai_score` and `ai_rationale`. Details in [agent-and-mcp.md](agent-and-mcp.md).
 
 ---
 
@@ -381,13 +384,13 @@ Only volunteers who passed 4.2 are ranked. Inputs: semantic similarity between t
 
 `GetVolunteerOffersQuery` (admin) reads enabled volunteer profiles of active users on `GET /admin/volunteers`. A profile is assigned when it has a `task_assignments` row in `ASSIGNED` (the screen links that request and shows its category and city) and unassigned otherwise; `page` and `assignment` (`all`, `assigned`, `unassigned`) only filter the read. Phone and address are not shown.
 
-**Events (new or changed in v1.1):** `UserRegistered` (no role), `UserDetailsUpdated`, `VolunteerProfileEnabled`, `VolunteerProfileUpdated`, `VolunteerProfileDisabled`, `VolunteerUnavailabilityAdded`, `VolunteerUnavailabilityCancelled`, `RequesterProfileUpdated`, `ConcurrencyClassified`. Payload definitions go in [event-sourcing.md](event-sourcing.md). `HelpRequestUpdated` is not emitted.
+**Events (new or changed in v1.1):** `UserRegistered` (no role), `UserDetailsUpdated`, `VolunteerProfileEnabled`, `VolunteerProfileUpdated`, `VolunteerProfileDisabled`, `VolunteerUnavailabilityAdded`, `VolunteerUnavailabilityCancelled`, `RequesterProfileUpdated`, `ConcurrencyClassified`, `ResourceTypeClassified`. Payload definitions go in [event-sourcing.md](event-sourcing.md). `HelpRequestUpdated` is not emitted.
 
 ---
 
 ## 6. User workflows (course 4.1-4.5)
 
-1. **Data entry:** register with name, email, phone, password, residence city, and home address only. From the account page, "my requests" opens the help-request area without a requester profile and without a ticket. A requester profile is still saved before a ticket is submitted. The volunteer area opens without a profile, with an empty taken-on list and an empty want-to-do column. "Add new volunteering" on that area saves the vehicle checkbox, one free-text narrative, frequency, and optional unavailability dates; the city is the residence city. Opening that form again adds another volunteering and leaves the saved ones unchanged. Each saved volunteering is edited on its own screen. A requester then creates a ticket. A ticket is not edited; the owner cancels it and submits a new one. Names, cities, addresses, and the narrative may be entered in Hebrew or English and are stored as written. On SQL Server those columns are bound as NVARCHAR so Hebrew is kept.
+1. **Data entry:** register with name, email, phone, password, residence city, and home address only. From the account page, "my requests" opens the help-request area without a requester profile and without a ticket. A requester profile is still saved before a ticket is submitted. The volunteer area opens without a profile, with an empty taken-on list and an empty want-to-do column. "Add new volunteering" on that area saves the vehicle checkbox, one free-text narrative, frequency, and optional unavailability dates; the city is the residence city. Opening that form again adds another volunteering and leaves the saved ones unchanged. Each saved volunteering is edited on its own screen. A requester then creates a ticket with category, urgency, a detailed description, frequency, whether a vehicle is required, an optional time window, city, and address. A preferred date is on that form only when frequency is on demand. Skills, duration, and delivery mode are not on that form. A ticket is not edited; the owner cancels it and submits a new one. Names, cities, addresses, and the narrative may be entered in Hebrew or English and are stored as written. On SQL Server those columns are bound as NVARCHAR so Hebrew is kept.
 2. **Search:** filters on category, city, urgency, status (requester: own rows; admin: all; volunteer: assigned tasks).
 3. **Table:** queues, candidates per ticket, history.
 4. **Detail:** narrative, scoped location, AI score breakdown for each of the K candidates, concurrency type, exclusion summary when `NO_MATCH`.

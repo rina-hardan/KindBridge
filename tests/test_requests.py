@@ -504,13 +504,11 @@ def request_body(**overrides):
         "category": "errands",
         "urgency": "NORMAL",
         "description": "Grocery run for the week",
-        "required_skills": ["נהיגה"],
-        "resource_type": "PHYSICAL_PRESENCE",
+        "frequency": "WEEKLY",
         "requires_vehicle": True,
         "preferred_date": "2026-10-20",
         "preferred_time_from": "09:00",
         "preferred_time_to": "11:00",
-        "estimated_duration_min": 90,
         "city": "Haifa",
         "address": "12 Herzl Street",
     }
@@ -565,13 +563,23 @@ def test_new_request_page_is_prefilled_from_the_profile(client):
     assert "12 Herzl Street".encode() in form.data
     assert "שליחויות".encode() in form.data
     assert "במקרה חירום רפואי".encode() in form.data
+    assert "ככל שהתיאור מפורט יותר".encode() in form.data
+    assert "באיזו תדירות צריך את העזרה".encode() in form.data
+    assert "נדרש רכב".encode() in form.data
+    assert "איך העזרה מתבצעת".encode() not in form.data
+    assert "כישורים נדרשים".encode() not in form.data
+    assert "משך בדקות".encode() not in form.data
+    assert "תאריך מועדף".encode() in form.data
+    assert "כמה פעמים צריך עזרה כזאת".encode() not in form.data
+    assert b'frequency.value === "ON_DEMAND"' in form.data
+    assert "משעה".encode() in form.data
 
 
 def test_submit_creates_a_pending_request_and_lists_it(client, engine):
     enroll(client)
 
     created = submit(client, description="קניות לשבוע", preferred_date="2020-01-01")
-    other = submit(client, category="transport", city="Tel Aviv", description="Ride to the clinic", preferred_date="2099-01-01", required_skills=[])
+    other = submit(client, category="transport", city="Tel Aviv", description="Ride to the clinic", preferred_date="2099-01-01", frequency="ON_DEMAND")
 
     assert created.status_code == 201
     request_id = created.get_json()["id"]
@@ -587,9 +595,14 @@ def test_submit_creates_a_pending_request_and_lists_it(client, engine):
         )
     assert row.status == "PENDING_REVIEW"
     assert row.category == "errands"
+    assert row.resource_type == "UNKNOWN"
+    assert row.frequency == "WEEKLY"
+    assert row.estimated_duration_min is None
     assert bool(row.requires_vehicle) is True
-    assert json.loads(row.required_skills_json) == ["driving"]
-    assert payload["required_skills"] == ["driving"]
+    assert json.loads(row.required_skills_json) == []
+    assert payload["required_skills"] == []
+    assert payload["resource_type"] == "UNKNOWN"
+    assert payload["frequency"] == "WEEKLY"
     assert payload["address"] == "12 Herzl Street"
     assert payload["description"] == "קניות לשבוע"
     assert "password" not in payload

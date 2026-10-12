@@ -11,6 +11,7 @@ from app.commands.bus import Command, CommandBus
 from app.commands.dtos import CancelRequestCommand, SubmitHelpRequestCommand
 from app.commands.user_commands import Clock, utc_now
 from app.domain.aggregates import HelpRequest
+from app.domain.requests import RESOURCE_TYPE_UNKNOWN
 from app.domain.errors import ConcurrencyConflict, DomainError, Forbidden, NotFound, ValidationError
 from app.domain.matching import capacity_or_overlap, is_self_assignment, rejection_reason
 from app.infrastructure.notification_service import NoNotifications, Notifications
@@ -157,14 +158,15 @@ class RequestCommandHandlers:
                 "city": cmd.city,
                 "address": cmd.address,
                 "category": cmd.category,
-                "resource_type": cmd.resource_type,
+                "resource_type": RESOURCE_TYPE_UNKNOWN,
                 "description": cmd.description,
                 "urgency": cmd.urgency,
+                "frequency": cmd.frequency,
                 "preferred_date": cmd.preferred_date,
                 "preferred_time_from": cmd.preferred_time_from,
                 "preferred_time_to": cmd.preferred_time_to,
-                "estimated_duration_min": cmd.estimated_duration_min,
-                "required_skills": list(cmd.required_skills),
+                "estimated_duration_min": None,
+                "required_skills": [],
                 "requires_vehicle": cmd.requires_vehicle,
                 "concurrency_type": "UNKNOWN",
                 "match_attempt": 0,

@@ -20,8 +20,8 @@ For each row, dispatch `ProposeMatchCommand` **once** per `match_attempt` using 
 
 Implementation: Deep Agents (LangChain) or equivalent LangGraph supervisor with sub-agents. Nodes:
 
-1. **Load**: request projection + required skills. If `concurrency_type` is `UNKNOWN`, classify and append `ConcurrencyClassified` before filtering. `FLEXIBLE_REMOTE` leans `PARALLEL_OK`; every other type, including a value that is still `UNKNOWN`, is `EXCLUSIVE`.
-2. **Retrieve (RAG)**: embed `description + category + required_skills`, plus the requester's accessibility notes when they exist. Query Chroma collection `volunteer_resumes`, `top_n = 15`. This happens before the hard filter. Do not take the top 3 and then filter them.
+1. **Load**: request projection. If `resource_type` is `UNKNOWN`, classify it from the category and the description (system-spec delivery rules) and append `ResourceTypeClassified` before filtering. Then, if `concurrency_type` is `UNKNOWN`, classify it from that resource type and append `ConcurrencyClassified`. `FLEXIBLE_REMOTE` leans `PARALLEL_OK`; every other type, including a value that is still `UNKNOWN`, is `EXCLUSIVE`.
+2. **Retrieve (RAG)**: embed `description + category + required_skills + frequency`, plus the requester's accessibility notes when they exist. New tickets have an empty skill list. Query Chroma collection `volunteer_resumes`, `top_n = 15`. This happens before the hard filter. Do not take the top 3 and then filter them.
 3. **Hard filter** (system-spec 4.2), applied only to those 15: inactive (`is_enabled = 0`, `users.is_active = 0`, or `availability_status = INACTIVE`), self-assignment, exemption, `DECLINED` on this request, unavailability period, geography, vehicle, capacity, schedule overlap. Semantic similarity is not a rejection. A volunteer with similarity 0 who passes the filter is still ranked. There is no `SEMANTIC_FILTER_NO_OVERLAP`.
 4. **Capacity tool (MCP Studio)**: `CheckVolunteerCapacityTool` on each survivor. `UNKNOWN` uses the exclusive cap (`current_active_tasks < max_active_tasks`). `PARALLEL_OK` uses `current_parallel_tasks < max_parallel_tasks`.
 5. **Travel tool (MCP Studio)**: `CalculateTravelContextTool`.
@@ -60,11 +60,11 @@ If the LLM call fails or exceeds 10s: use a template rationale (top two score co
 ```
 score = 100 * (
   0.45 * cosine_similarity_clipped   # 0..1 from Chroma
-  + 0.20 * skill_overlap               # |intersection| / |required| after Hebrew/English aliases (1 if required empty)
+  + 0.20 * skill_overlap               # |intersection| / |required| after Hebrew/English aliases (1 if required empty; new tickets do not separate candidates)
   + 0.15 * travel_feasibility          # 1 if same city; 0.6 if tool distance < 40km; else 0.2
   + 0.10 * urgency_fit                 # EMERGENCY 1.0, HIGH 0.85, NORMAL 0.7, LOW 0.55 (availability already filtered)
   + 0.05 * vehicle_fit                 # 1 if not required or has_vehicle
-  + 0.05 * frequency_bonus             # ON_DEMAND 1.0, WEEKLY 0.9, BIWEEKLY 0.8, MONTHLY 0.7
+  + 0.05 * frequency_fit               # request frequency vs volunteer base_frequency; see system-spec 4.6
 )
 ```
 
@@ -122,7 +122,7 @@ Output: `{ "eligible": bool, "reason": string | null }`. `reason` is `capacity` 
 
 `volunteer_id` is `volunteer_profiles.id`. Capacity follows the stored concurrency type, and `UNKNOWN` is evaluated as `EXCLUSIVE`.
 
-Overlap follows system-spec 4.4: allowed only when both the request and the assigned task are `PARALLEL_OK`. Windows (`preferred_time_from`/`to`, or `estimated_duration_min` from a start time) are compared on the same date. Without a window, two exclusive tasks on the same date overlap; a `PARALLEL_OK` task is not blocked by the date alone. `FLEXIBLE_REMOTE` does not change that rule; concurrency type does. Remote work still counts toward `max_parallel_tasks`.
+Overlap follows system-spec 4.4: allowed only when both the request and the assigned task are `PARALLEL_OK`. A time window is `preferred_time_from` and `preferred_time_to` on the same date. The form does not collect a duration; a stored `estimated_duration_min` on an older row still extends a start time that has no end. Without a window, two exclusive tasks on the same date overlap; a `PARALLEL_OK` task is not blocked by the date alone. `FLEXIBLE_REMOTE` does not change that rule; concurrency type does. Remote work still counts toward `max_parallel_tasks`.
 
 ## 6. External MCP (NFR 9)
 

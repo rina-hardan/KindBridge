@@ -13,7 +13,7 @@ from app.commands.dtos import (
     UpdateVolunteerSkillsCommand,
 )
 from app.commands.request_commands import CompleteTaskCommand, ReleaseTaskCommand
-from app.domain.requests import ALL_STATUSES, CATEGORIES, RESOURCE_TYPES, URGENCIES
+from app.domain.requests import ALL_STATUSES, CATEGORIES, FREQUENCIES, URGENCIES
 from app.i18n import localize
 from app.queries.account_queries import AccountView, GetMyAccountQuery, GetMyProfilesQuery
 from app.queries.request_queries import GetRequesterDefaultsQuery
@@ -215,7 +215,7 @@ def new_request_page():
         defaults=defaults,
         categories=CATEGORIES,
         urgencies=URGENCIES,
-        resource_types=RESOURCE_TYPES,
+        frequencies=FREQUENCIES,
     )
 
 

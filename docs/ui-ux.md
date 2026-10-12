@@ -47,7 +47,7 @@ Goal: professional, calm civic-ops UI (not a marketing landing page). Screen cop
 | Route | Course map | Content |
 | :--- | :--- | :--- |
 | `/me/requests` | table 4.3, search 4.1 | Filters (status, category, urgency, city) and a table of own tickets. Status defaults to open requests (`PENDING_REVIEW`, `MATCH_PROPOSED`, `NO_MATCH`, `ASSIGNED`), so a cancelled ticket leaves the list until that status is chosen. No edit. Cancel confirms, and when the ticket is `ASSIGNED` the confirm says the volunteer will be notified |
-| `/me/requests/new` | input 4.5 | Create request form. City and address start from the requester profile. Submitting opens a new ticket; it does not change an existing one |
+| `/me/requests/new` | input 4.5 | Create request form. Category, urgency, a description that asks for as much detail as possible, frequency (same four values as volunteering), a vehicle checkbox, an optional time window, and city and address starting from the requester profile. A preferred date is shown only when frequency is on demand; every other frequency hides it. No skills, no duration, and no delivery-mode choice. Submitting opens a new ticket; it does not change an existing one |
 | `/requests/<id>` | detail 4.2 | Status, description; volunteer identity only after ASSIGNED; Cancel button for non-terminal requests. No edit |
 
 ### Volunteer

@@ -18,7 +18,12 @@ from app.commands.bus import Command, CommandBus
 from app.commands.user_commands import Clock, utc_now
 from app.domain.aggregates import HelpRequest
 from app.domain.errors import NotFound
-from app.domain.events import CONCURRENCY_CLASSIFIED, MATCHES_PROPOSED, NO_MATCH_FOUND
+from app.domain.events import (
+    CONCURRENCY_CLASSIFIED,
+    MATCHES_PROPOSED,
+    NO_MATCH_FOUND,
+    RESOURCE_TYPE_CLASSIFIED,
+)
 from app.domain.matching import (
     PROPOSAL_LIMIT,
     TOP_N,
@@ -28,6 +33,7 @@ from app.domain.matching import (
     ScoredVolunteer,
     VolunteerRecord,
     DECLINED,
+    classify_resource_type,
     count_rejections,
     default_concurrency,
     rank_proposals,
@@ -98,6 +104,7 @@ class MatchWork:
     facts: FilterFacts | None = None
     web_lookup: str = "skipped"
     classification: tuple[str, str] | None = None
+    resource_classification: tuple[str, str] | None = None
     stop: bool = False
     outcome: str = ""
     proposed: int = 0
@@ -232,24 +239,29 @@ class MatchCommandHandlers:
             view = self._reader.load_request(conn, work.command.request_id)
         if view is None:
             raise NotFound("Help request was not found")
+        resource_type = view.resource_type
+        if resource_type == UNKNOWN:
+            resource_type, resource_reason = classify_resource_type(view.category, view.description)
+            work.resource_classification = (resource_type, resource_reason)
         concurrency = request.concurrency_type or view.concurrency_type
         if concurrency == UNKNOWN:
-            kind, reason = default_concurrency(view.resource_type)
+            kind, reason = default_concurrency(resource_type)
             work.classification = (kind, reason)
             concurrency = kind
-        if concurrency != view.concurrency_type:
+        if resource_type != view.resource_type or concurrency != view.concurrency_type:
             view = RequestRecord(
                 request_id=view.request_id,
                 requester_id=view.requester_id,
                 city=view.city,
                 category=view.category,
-                resource_type=view.resource_type,
+                resource_type=resource_type,
                 description=view.description,
                 urgency=view.urgency,
                 slot=view.slot,
                 required_skills=view.required_skills,
                 requires_vehicle=view.requires_vehicle,
                 concurrency_type=concurrency,
+                frequency=view.frequency,
             )
         work.view = view
 
@@ -260,7 +272,9 @@ class MatchCommandHandlers:
         assert view is not None
         with self._engine.connect() as conn:
             notes = self._reader.accessibility_notes(conn, view.requester_id)
-        work.query_text = request_query_text(view.description, view.category, view.required_skills, notes)
+        work.query_text = request_query_text(
+            view.description, view.category, view.required_skills, notes, view.frequency
+        )
         last_error: Exception | None = None
         for attempt in range(self._retrieval_attempts):
             if attempt:
@@ -400,6 +414,7 @@ class MatchCommandHandlers:
                 frequency=volunteer.base_frequency,
                 preferred_date=view.preferred_date,
                 today=today,
+                request_frequency=view.frequency,
             )
             try:
                 rationale = self._rationale.write(parts, candidate.travel_note, work.web_lookup)
@@ -416,6 +431,18 @@ class MatchCommandHandlers:
             )
         chosen = rank_proposals(scored)
         payloads: list[tuple[str, dict]] = []
+        if work.resource_classification is not None:
+            kind, reason = work.resource_classification
+            payloads.append(
+                (
+                    RESOURCE_TYPE_CLASSIFIED,
+                    {
+                        "resource_type": kind,
+                        "reason": reason,
+                        "match_attempt": work.command.match_attempt,
+                    },
+                )
+            )
         if work.classification is not None:
             kind, reason = work.classification
             payloads.append(

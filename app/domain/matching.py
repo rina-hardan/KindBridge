@@ -30,7 +30,12 @@ UNKNOWN = "UNKNOWN"
 
 URGENCY_FIT = {"EMERGENCY": 1.0, "HIGH": 0.85, "NORMAL": 0.7, "LOW": 0.55}
 FREQUENCY_BONUS = {"ON_DEMAND": 1.0, "WEEKLY": 0.9, "BIWEEKLY": 0.8, "MONTHLY": 0.7}
-_PHYSICAL = frozenset({"PHYSICAL_PRESENCE", "EQUIPMENT_LOAN"})
+_CADENCE = {"WEEKLY": 3, "BIWEEKLY": 2, "MONTHLY": 1}
+_PHYSICAL = frozenset({"PHYSICAL_PRESENCE", "EQUIPMENT_LOAN", UNKNOWN})
+_REMOTE_CATEGORIES = frozenset({"tutoring", "translation"})
+_EQUIPMENT_CUES = ("השאלה", "להשאיל", "השאלת", "ציוד", "equipment", "lending", "to lend")
+_REMOTE_CUES = ("מרחוק", "בטלפון", "זום", "zoom", "online", "remote", "וירטואלי", "by phone")
+_PRESENCE_CUES = ("להגיע", "בבית", "במקום", "לבוא", "in person", "at home", "come over")
 
 
 @dataclass(frozen=True)
@@ -71,6 +76,7 @@ class RequestRecord:
     required_skills: tuple[str, ...]
     requires_vehicle: bool
     concurrency_type: str
+    frequency: str = "ON_DEMAND"
 
     @property
     def preferred_date(self) -> date | None:
@@ -122,6 +128,47 @@ def effective_concurrency(concurrency_type: str) -> str:
     return EXCLUSIVE
 
 
+def classify_resource_type(category: str, description: str) -> tuple[str, str]:
+    """How the help happens, from the category and the description.
+
+    The requester does not choose this. Equipment, remote, and on-site phrases
+    in the description win. Otherwise tutoring and translation lean remote, and
+    every other category leans on site.
+    """
+    text = description or ""
+    if _contains_cue(text, _EQUIPMENT_CUES):
+        return "EQUIPMENT_LOAN", "description asks to lend equipment"
+    if _contains_cue(text, _REMOTE_CUES):
+        return "FLEXIBLE_REMOTE", "description can be done remotely"
+    if _contains_cue(text, _PRESENCE_CUES):
+        return "PHYSICAL_PRESENCE", "description needs someone on site"
+    if category in _REMOTE_CATEGORIES:
+        return "FLEXIBLE_REMOTE", f"{category} leans remote"
+    label = category or "request"
+    return "PHYSICAL_PRESENCE", f"{label} leans on site"
+
+
+def frequency_fit(request_frequency: str, volunteer_frequency: str) -> float:
+    """Soft fit. A one-off request keeps the volunteer frequency bonus.
+
+    The same cadence, or a volunteer who can help at least that often, scores
+    higher. A less frequent volunteer scores lower. Never a hard filter.
+    """
+    if request_frequency == "ON_DEMAND":
+        return FREQUENCY_BONUS.get(volunteer_frequency, 0.0)
+    if volunteer_frequency == request_frequency:
+        return 1.0
+    if volunteer_frequency == "ON_DEMAND":
+        return 0.75
+    volunteer_rank = _CADENCE.get(volunteer_frequency)
+    request_rank = _CADENCE.get(request_frequency)
+    if volunteer_rank is None or request_rank is None:
+        return 0.0
+    if volunteer_rank >= request_rank:
+        return 0.9
+    return 0.5
+
+
 def default_concurrency(resource_type: str) -> tuple[str, str]:
     """Stored classification used when the request is still UNKNOWN.
 
@@ -140,9 +187,12 @@ def request_query_text(
     category: str,
     required_skills: Sequence[str],
     accessibility_notes: str | None = None,
+    frequency: str | None = None,
 ) -> str:
     """Text embedded for the volunteer_resumes query."""
     parts = [description.strip(), category.strip(), " ".join(required_skills).strip()]
+    if frequency and frequency.strip():
+        parts.append(frequency.strip())
     if accessibility_notes and accessibility_notes.strip():
         parts.append(accessibility_notes.strip())
     return " ".join(part for part in parts if part)
@@ -186,6 +236,7 @@ def score_candidate(
     frequency: str,
     preferred_date: date | None,
     today: date,
+    request_frequency: str = "ON_DEMAND",
 ) -> tuple[float, dict[str, float]]:
     """Weighted ai_score in 0..100. The LLM does not supply this number."""
     parts = {
@@ -194,7 +245,7 @@ def score_candidate(
         "travel": 0.15 * _unit(travel_feasibility),
         "urgency": 0.10 * URGENCY_FIT.get(urgency, 0.55),
         "vehicle": 0.05 * (1.0 if has_vehicle_fit else 0.0),
-        "frequency": 0.05 * FREQUENCY_BONUS.get(frequency, 0.0),
+        "frequency": 0.05 * frequency_fit(request_frequency, frequency),
     }
     score = 100.0 * sum(parts.values())
     if preferred_date is not None and preferred_date < today:
@@ -316,6 +367,11 @@ def _bounds(slot: TimeSlot) -> tuple[time, time] | None:
     if end.time() <= slot.time_from:
         return None
     return slot.time_from, end.time()
+
+
+def _contains_cue(text: str, cues: tuple[str, ...]) -> bool:
+    folded = text.casefold()
+    return any(cue.casefold() in folded for cue in cues)
 
 
 def _unit(value: float) -> float:

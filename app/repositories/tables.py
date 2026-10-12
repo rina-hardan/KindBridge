@@ -112,6 +112,7 @@ help_requests = Table(
     Column("resource_type", String(30), nullable=False),
     Column("description", UnicodeText, nullable=False),
     Column("urgency", String(20), nullable=False),
+    Column("frequency", String(30), nullable=False, server_default="ON_DEMAND"),
     Column("preferred_date", Date, nullable=True),
     Column("preferred_time_from", Time, nullable=True),
     Column("preferred_time_to", Time, nullable=True),

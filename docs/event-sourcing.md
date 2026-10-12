@@ -57,7 +57,8 @@ Never put a plaintext password in any payload. Password hashes must not appear i
 
 ### HelpRequest
 
-- `HelpRequestCreated`: `requester_id`, `city`, `address`, `category`, `resource_type`, `description`, `urgency`, `preferred_date`, `preferred_time_from`, `preferred_time_to`, `estimated_duration_min`, `required_skills`, `requires_vehicle`, `concurrency_type` (`UNKNOWN` at submit), `match_attempt` (`0`). `series_id` stays null. `address` is plaintext in the payload; queries hide it until the request is `ASSIGNED`. v1 does not emit `HelpRequestUpdated`; the owner cancels and submits a new request.
+- `HelpRequestCreated`: `requester_id`, `city`, `address`, `category`, `resource_type` (`UNKNOWN` at submit), `description`, `urgency`, `frequency` (`ON_DEMAND`, `WEEKLY`, `BIWEEKLY`, or `MONTHLY`), `preferred_date`, `preferred_time_from`, `preferred_time_to`, `estimated_duration_min` (null; the form does not collect it), `required_skills` (`[]`; the form does not collect skills), `requires_vehicle`, `concurrency_type` (`UNKNOWN` at submit), `match_attempt` (`0`). `series_id` stays null. `address` is plaintext in the payload; queries hide it until the request is `ASSIGNED`. v1 does not emit `HelpRequestUpdated`; the owner cancels and submits a new request.
+- `ResourceTypeClassified`: appended by `ProposeMatchCommand` when `resource_type` is still `UNKNOWN`, before the hard filter. Payload: `resource_type` (`PHYSICAL_PRESENCE`, `EQUIPMENT_LOAN`, or `FLEXIBLE_REMOTE`), `reason`, `match_attempt`. The projector sets `help_requests.resource_type`. The aggregate does not change status.
 - `MatchesProposed`: array of `{ volunteer_id, score, rationale, rank }`, `match_attempt`, `k`.
 - `NoMatchFound`: `match_attempt`, `reason`, `rejection_summary` (counts per hard-filter reason).
 - `MatchRetriggered`.
