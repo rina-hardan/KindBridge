@@ -22,6 +22,25 @@
   </div>
 </section>
 
+<section class="mb-4" aria-labelledby="match-distribution">
+  <h2 id="match-distribution" class="h6 mb-3">{{ t("dashboard.matches") }}</h2>
+  <div class="card border-0 shadow-sm">
+    <div class="card-body">
+      <div class="kb-bars">
+        {% for status, count in dashboard.matches.as_rows() %}
+        <div class="kb-bar">
+          <p class="mb-1 small" data-match="{{ status }}">{{ count }}</p>
+          <div class="kb-bar-track" role="img" aria-label="{{ t('match_status.' + status) }}: {{ count }}">
+            <div class="kb-bar-fill" style="height: {{ dashboard.matches.share(count) }}%"></div>
+          </div>
+          <p class="mb-0 small text-center">{{ t("match_status." + status) }}</p>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</section>
+
 <section class="mb-4" aria-labelledby="open-queue">
   <h2 id="open-queue" class="h6 mb-3">{{ t("dashboard.queue") }}</h2>
   {% if dashboard.requests %}

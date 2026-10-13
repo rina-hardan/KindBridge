@@ -587,7 +587,8 @@ def test_exclusive_tasks_on_the_same_date_overlap(engine, clock):
 def test_pending_poll_orders_emergency_first(engine):
     low = uuid4()
     urgent = uuid4()
-    done = uuid4()
+    proposed = uuid4()
+    assigned = uuid4()
     requester = uuid4()
     stamp = datetime(2026, 10, 6, 8, 0, 0)
     with engine.begin() as conn:
@@ -595,7 +596,8 @@ def test_pending_poll_orders_emergency_first(engine):
         for request_id, urgency, status, created_at in (
             (low, "NORMAL", "PENDING_REVIEW", stamp),
             (urgent, "EMERGENCY", "PENDING_REVIEW", datetime(2026, 10, 6, 11, 0, 0)),
-            (done, "EMERGENCY", "MATCH_PROPOSED", stamp),
+            (proposed, "EMERGENCY", "MATCH_PROPOSED", stamp),
+            (assigned, "EMERGENCY", "ASSIGNED", stamp),
         ):
             conn.execute(
                 insert(help_requests).values(
@@ -617,7 +619,84 @@ def test_pending_poll_orders_emergency_first(engine):
             )
         pending = SqlMatchingReader().pending_requests(conn)
 
-    assert [row.request_id for row in pending] == [urgent, low]
+    assert [row.request_id for row in pending] == [urgent, proposed, low]
+
+
+def test_refresh_with_the_same_volunteers_writes_nothing(engine, clock):
+    requester = uuid4()
+    request_id = uuid4()
+    with engine.begin() as conn:
+        _user(conn, requester, "requester@example.com")
+        _profile_id = _volunteer(conn)[1]
+    _open_request(engine, request_id, requester)
+    handler = _handler(engine, clock, Catalog([_hit(_profile_id, 0.4)]))
+
+    first = _propose(handler, request_id)
+    request, assignments, events = _rows(engine, request_id)
+    second = _propose(handler, request_id, match_attempt=int(request["match_attempt"]))
+
+    again, still, later = _rows(engine, request_id)
+    assert first.outcome == "proposed"
+    assert second.outcome == "unchanged"
+    assert again["status"] == "MATCH_PROPOSED"
+    assert int(again["match_attempt"]) == int(request["match_attempt"])
+    assert len(later) == len(events)
+    assert [row["status"] for row in still] == ["PROPOSED"]
+    assert len(assignments) == 1
+
+
+def test_refresh_replaces_proposals_when_a_closer_volunteer_appears(engine, clock):
+    requester = uuid4()
+    request_id = uuid4()
+    with engine.begin() as conn:
+        _user(conn, requester, "requester@example.com")
+        weak = _volunteer(conn)[1]
+        strong = _volunteer(conn)[1]
+    _open_request(engine, request_id, requester)
+    catalog = Catalog([_hit(weak, 0.2)])
+    handler = _handler(engine, clock, catalog)
+    _propose(handler, request_id)
+    request, _assignments, _events = _rows(engine, request_id)
+    catalog.hits = [_hit(strong, 0.95), _hit(weak, 0.2)]
+
+    result = _propose(handler, request_id, match_attempt=int(request["match_attempt"]))
+
+    again, assignments, events = _rows(engine, request_id)
+    proposed = sorted(
+        (row for row in assignments if row["status"] == "PROPOSED"),
+        key=lambda row: row["rank_in_batch"],
+    )
+    superseded = [row for row in assignments if row["status"] == "SUPERSEDED"]
+    updated = [event for event in events if event.event_type == "MatchesProposed"]
+    assert result.outcome == "proposed"
+    assert again["status"] == "MATCH_PROPOSED"
+    assert str(proposed[0]["volunteer_id"]) == str(strong)
+    assert {str(row["volunteer_id"]) for row in proposed} == {str(strong), str(weak)}
+    assert [str(row["volunteer_id"]) for row in superseded] == [str(weak)]
+    assert updated[-1].payload["updated"] is True
+
+
+def test_refresh_with_an_empty_pool_keeps_the_current_proposals(engine, clock):
+    requester = uuid4()
+    request_id = uuid4()
+    with engine.begin() as conn:
+        _user(conn, requester, "requester@example.com")
+        profile_id = _volunteer(conn)[1]
+    _open_request(engine, request_id, requester)
+    catalog = Catalog([_hit(profile_id, 0.8)])
+    handler = _handler(engine, clock, catalog)
+    _propose(handler, request_id)
+    request, before, events = _rows(engine, request_id)
+    catalog.hits = []
+
+    result = _propose(handler, request_id, match_attempt=int(request["match_attempt"]))
+
+    again, after, later = _rows(engine, request_id)
+    assert result.outcome == "unchanged"
+    assert again["status"] == "MATCH_PROPOSED"
+    assert [row["status"] for row in after] == ["PROPOSED"]
+    assert len(later) == len(events)
+    assert before[0]["id"] == after[0]["id"]
 
 
 def test_hard_filter_rules_and_score_formula():

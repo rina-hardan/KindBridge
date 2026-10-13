@@ -276,6 +276,38 @@ def test_no_match_emails_the_admin_with_the_rejection_summary(engine, clock):
     assert str(request_id) in mail.body
 
 
+def test_a_refresh_emails_the_admin_only_when_the_volunteers_change(engine, clock):
+    fake = FakeNotifier()
+    requester, request_id = uuid4(), uuid4()
+    with engine.begin() as conn:
+        _user(conn, requester, "requester@example.com")
+        _admin(conn)
+        (first_user, first), (second_user, second) = _volunteer(conn), _volunteer(conn)
+        _name(conn, first_user, "Noa Strong")
+        _name(conn, second_user, "Avi Closer")
+    _open_request(engine, request_id, requester)
+    catalog = Catalog([_hit(first, 0.4)])
+    handler = _match_handler(engine, clock, catalog, _service(engine, fake))
+
+    _propose_match(handler, request_id)
+    with engine.connect() as conn:
+        attempt = conn.execute(
+            select(help_requests.c.match_attempt).where(help_requests.c.id == request_id)
+        ).scalar_one()
+    catalog.hits = [_hit(first, 0.9)]
+    same = _propose_match(handler, request_id, attempt)
+    catalog.hits = [_hit(second, 0.99), _hit(first, 0.4)]
+    changed = _propose_match(handler, request_id, attempt)
+
+    assert same.outcome == "unchanged"
+    assert changed.outcome == "proposed"
+    assert [mail.subject for mail in fake.sent] == [
+        "הצעת התאמה חדשה ממתינה לבדיקה",
+        "הצעת ההתאמה עודכנה וממתינה לבדיקה",
+    ]
+    assert fake.sent[1].body.index("Avi Closer") < fake.sent[1].body.index("Noa Strong")
+
+
 def test_a_second_poll_of_the_same_attempt_does_not_email_again(engine, clock):
     fake = FakeNotifier()
     requester, request_id = uuid4(), uuid4()

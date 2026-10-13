@@ -13,6 +13,7 @@ from app.domain.aggregates import OPEN_REQUEST_STATUSES
 from app.repositories.tables import help_requests, task_assignments, users, volunteer_profiles, volunteer_unavailability
 
 CANDIDATE_STATUSES = ("PROPOSED", "ASSIGNED")
+MATCH_STATUSES = ("PROPOSED", "ASSIGNED", "DECLINED", "COMPLETED", "SUPERSEDED")
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,7 @@ class VolunteerCapacityRow:
 @dataclass(frozen=True)
 class DashboardSnapshot:
     status_counts: dict[str, int]
+    match_counts: dict[str, int]
     page: int
     page_count: int
     requests: tuple[OpenRequestRow, ...]
@@ -56,6 +58,7 @@ class AdminReadRepository:
             page = min(max(page, 1), page_count)
             return DashboardSnapshot(
                 status_counts=counts,
+                match_counts=self.match_counts(conn),
                 page=page,
                 page_count=page_count if total_open else 1,
                 requests=self.open_requests(conn, offset=(page - 1) * page_size, limit=page_size),
@@ -71,6 +74,18 @@ class AdminReadRepository:
         )
         for status, count in rows:
             counts[str(status)] = int(count)
+        return counts
+
+    def match_counts(self, conn: Connection) -> dict[str, int]:
+        """Every assignment row, including matches on closed requests."""
+        counts = {status: 0 for status in MATCH_STATUSES}
+        rows = conn.execute(
+            select(task_assignments.c.status, func.count()).group_by(task_assignments.c.status)
+        )
+        for status, count in rows:
+            key = str(status)
+            if key in counts:
+                counts[key] = int(count)
         return counts
 
     def open_requests(self, conn: Connection, *, offset: int, limit: int) -> tuple[OpenRequestRow, ...]:

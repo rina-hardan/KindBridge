@@ -101,6 +101,7 @@ class MatchProjector:
         )
         items = event.payload.get("proposals") or event.payload.get("matches") or []
         stamp = _naive_utc(event.created_at)
+        _supersede_proposed(conn, event.aggregate_id, stamp)
         for item in items:
             conn.execute(
                 insert(task_assignments).values(

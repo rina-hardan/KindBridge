@@ -169,9 +169,10 @@ def test_admin_queue_counts_candidates_and_capacity(app, client, engine):
             category="פינוי",
             created_at=datetime(2026, 10, 4, 9, 0),
         )
-        _request(conn, requester_id, description="בקשה שנסגרה", status="COMPLETED")
+        closed_id = _request(conn, requester_id, description="בקשה שנסגרה", status="COMPLETED")
         _assignment(conn, open_id, noa, status="PROPOSED", score=91, rationale="התאמה גבוהה לנהיגה", rank=1)
         _assignment(conn, open_id, yossi, status="SUPERSEDED", score=10, rationale="הצעה ישנה", rank=2)
+        _assignment(conn, closed_id, noa, status="COMPLETED", score=80, rationale="בוצעה", rank=1)
 
     page = client.get("/dashboard")
     body = page.data.decode()
@@ -199,6 +200,12 @@ def test_admin_queue_counts_candidates_and_capacity(app, client, engine):
     assert 'data-gauge="available">1' in body
     assert 'data-gauge="busy">1' in body
     assert 'data-gauge="inactive">1' in body
+    assert "התפלגות התאמות" in body
+    assert 'data-match="PROPOSED">1' in body
+    assert 'data-match="ASSIGNED">0' in body
+    assert 'data-match="DECLINED">0' in body
+    assert 'data-match="COMPLETED">1' in body
+    assert 'data-match="SUPERSEDED">1' in body
     assert "/requests/" in body
 
 
@@ -210,5 +217,7 @@ def test_empty_dashboard_has_no_create_action(app, client):
 
     assert page.status_code == 200
     assert "אין בקשות עזרה פתוחות." in body
+    assert "התפלגות התאמות" in body
+    assert 'data-match="PROPOSED">0' in body
     assert 'data-gauge="available">0' in body
     assert 'type="submit"' not in body

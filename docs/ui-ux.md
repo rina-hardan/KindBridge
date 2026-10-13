@@ -63,7 +63,7 @@ Goal: professional, calm civic-ops UI (not a marketing landing page). Screen cop
 
 | Route | Course map | Content |
 | :--- | :--- | :--- |
-| `/dashboard` | 4.4 | KPIs: counts by request status; bar/list of **candidate count per open request**; volunteer gauges Available/Busy/Inactive |
+| `/dashboard` | 4.4 | KPIs: counts by request status; bar/list of **candidate count per open request**; volunteer gauges Available/Busy/Inactive; bar chart of match counts for every assignment status (`PROPOSED`, `ASSIGNED`, `DECLINED`, `COMPLETED`, `SUPERSEDED`), counting every match no matter the request status |
 | `/requests` | 4.1 + 4.3 | Global search/filter table |
 | `/requests/<id>` | 4.2 | Three proposed cards (score, the volunteer's offer text, city); Approve on one; Reject all (with reason); Override picker; Retrigger. After ASSIGNED: assigned volunteer details and Cancel |
 

@@ -97,6 +97,36 @@ body {
   width: 0;
 }
 
+.kb-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+
+.kb-bar {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.kb-bar-track {
+  width: 100%;
+  max-width: 2.5rem;
+  height: 8rem;
+  background: #e6eeee;
+  border-radius: 0.35rem;
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+}
+
+.kb-bar-fill {
+  width: 100%;
+  background: var(--kb-accent);
+}
+
 dialog {
   border: 0;
   border-radius: 0.75rem;
