@@ -3,10 +3,11 @@
 {% block content %}
 <div class="row g-4 align-items-start">
   <div class="col-lg-8">
+    {% if not profile %}
     <div class="card border-0 shadow-sm mb-4">
       <div class="card-body p-4">
-        <h1 class="h4 mb-1">{{ t("volunteer.edit_title") if profile else t("volunteer.add_title") }}</h1>
-        <p class="text-body-secondary small mb-4">{{ t("volunteer.edit_lead") if profile else t("volunteer.lead") }}</p>
+        <h1 class="h4 mb-1">{{ t("volunteer.add_title") }}</h1>
+        <p class="text-body-secondary small mb-4">{{ t("volunteer.lead") }}</p>
         {% if period_error %}
         <div class="alert alert-danger" role="alert">{{ period_error }}</div>
         {% endif %}
@@ -37,7 +38,7 @@
               </select>
               <div class="invalid-feedback" data-field="base_frequency"></div>
             </div>
-            {% if not profile %}
+            {% include "account/_volunteer_schedule.html" %}
             <div class="col-12">
               <h2 class="h6 mb-1">{{ t("volunteer.away_title") }}</h2>
               <p class="text-body-secondary small mb-1">{{ t("volunteer.away_optional") }}</p>
@@ -58,7 +59,6 @@
               <input id="reason" name="reason" class="form-control" dir="auto" maxlength="200">
               <div class="invalid-feedback" data-field="reason"></div>
             </div>
-            {% endif %}
           </div>
           <div class="d-flex gap-2 mt-4">
             <button type="submit" class="btn btn-kb">{{ t("volunteer.save") }}</button>
@@ -67,13 +67,14 @@
         </form>
       </div>
     </div>
-
-    {% if profile %}
+    {% else %}
     <div class="card border-0 shadow-sm">
       <div class="card-body p-4">
-        <h2 class="h6">{{ t("volunteer.away_title") }}</h2>
-        <p class="text-body-secondary small mb-1">{{ t("volunteer.away_optional") }}</p>
-        <p class="text-body-secondary small">{{ t("volunteer.away_lead") }}</p>
+        <h1 class="h4 mb-1">{{ t("volunteer.edit_title") }}</h1>
+        <p class="text-body-secondary small mb-4">{{ t("volunteer.edit_lead") }}</p>
+        {% if period_error %}
+        <div class="alert alert-danger" role="alert">{{ period_error }}</div>
+        {% endif %}
         <div id="period-error" class="alert alert-danger d-none" role="alert"></div>
         <form id="period-form" novalidate>
           <div class="row g-3">
@@ -95,8 +96,9 @@
           </div>
           <button type="submit" class="btn btn-outline-primary mt-3">{{ t("volunteer.add_period") }}</button>
         </form>
+        <a class="btn btn-outline-secondary mt-3" href="{{ url_for('account.tasks_page') }}">{{ t("profile.my_tasks") }}</a>
         {% if profile.periods %}
-        <ul class="list-group list-group-flush mt-4">
+        <ul id="period-list" class="list-group list-group-flush mt-4">
           {% for period in profile.periods %}
           <li class="list-group-item px-0 d-flex justify-content-between align-items-start gap-3">
             <div>
@@ -108,7 +110,7 @@
           {% endfor %}
         </ul>
         {% else %}
-        <p class="text-body-secondary small mt-4 mb-0">{{ t("volunteer.no_periods") }}</p>
+        <p id="period-empty" class="text-body-secondary small mt-4 mb-0">{{ t("volunteer.no_periods") }}</p>
         {% endif %}
       </div>
     </div>
@@ -145,30 +147,36 @@
   const profileId = {{ profile.profile_id|tojson if profile else "null" }};
   const form = document.getElementById("volunteer-form");
 
-  KB.bindForm("volunteer-form", creating ? "/api/me/volunteer" : "/api/profile", (current) => {
-    const body = {
-      has_vehicle: current.has_vehicle.checked,
-      experience: current.experience.value,
-      base_frequency: current.base_frequency.value,
-    };
-    if (!creating) body.profile_id = profileId;
-    return body;
-  }, async (saved) => {
-    if (creating && (form.from_date.value || form.until_date.value)) {
-      const period = await KB.post("/api/me/unavailability", {
-        profile_id: saved.profile_id,
-        from_date: form.from_date.value,
-        until_date: form.until_date.value,
-        reason: form.reason.value,
-      });
-      if (!period.ok) {
-        const message = period.data.message || window.KB_TEXT.genericError;
-        window.location.href = "/me/volunteer/" + saved.profile_id + "?period_error=" + encodeURIComponent(message);
-        return;
+  if (form) {
+    KB.bindForm("volunteer-form", creating ? "/api/me/volunteer" : "/api/profile", (current) => {
+      const onDemand = current.base_frequency.value === "ON_DEMAND";
+      const body = {
+        has_vehicle: current.has_vehicle.checked,
+        experience: current.experience.value,
+        base_frequency: current.base_frequency.value,
+        preferred_time_from: current.preferred_time_from.value || null,
+        preferred_time_to: current.preferred_time_to.value || null,
+        preferred_weekdays: onDemand ? [] : [...current.querySelectorAll('input[name="preferred_weekdays"]:checked')].map((box) => box.value),
+      };
+      if (!creating) body.profile_id = profileId;
+      return body;
+    }, async (saved) => {
+      if (creating && (form.from_date.value || form.until_date.value)) {
+        const period = await KB.post("/api/me/unavailability", {
+          profile_id: saved.profile_id,
+          from_date: form.from_date.value,
+          until_date: form.until_date.value,
+          reason: form.reason.value,
+        });
+        if (!period.ok) {
+          const message = period.data.message || window.KB_TEXT.genericError;
+          window.location.href = "/me/volunteer/" + saved.profile_id + "?period_error=" + encodeURIComponent(message);
+          return;
+        }
       }
-    }
-    window.location.href = creating ? "/me/tasks" : window.location.pathname;
-  });
+      window.location.href = creating ? "/me/tasks" : window.location.pathname;
+    });
+  }
 
   const periodForm = document.getElementById("period-form");
   const periodError = document.getElementById("period-error");
@@ -186,11 +194,37 @@
       until_date: periodForm.until_date.value,
       reason: periodForm.reason.value,
     });
-    button.disabled = false;
     if (result.ok) {
-      window.location.href = window.location.pathname;
+      const from = periodForm.from_date.value;
+      const until = periodForm.until_date.value;
+      const reason = periodForm.reason.value.trim();
+      let list = document.getElementById("period-list");
+      if (!list) {
+        list = document.createElement("ul");
+        list.id = "period-list";
+        list.className = "list-group list-group-flush mt-4";
+        document.getElementById("period-empty").replaceWith(list);
+      }
+      const item = document.createElement("li");
+      item.className = "list-group-item px-0";
+      const dates = document.createElement("div");
+      dates.textContent = from + " – " + until;
+      item.append(dates);
+      if (reason) {
+        const note = document.createElement("div");
+        note.className = "small text-body-secondary";
+        note.dir = "auto";
+        note.textContent = reason;
+        item.append(note);
+      }
+      list.append(item);
+      periodForm.reset();
+      window.setTimeout(() => {
+        window.location.href = "/me/tasks";
+      }, 1000);
       return;
     }
+    button.disabled = false;
     const fields = result.data.fields || {};
     let shown = false;
     Object.entries(fields).forEach(([field, message]) => {
@@ -206,6 +240,18 @@
       periodError.classList.remove("d-none");
     }
   });
+
+  const frequencySelect = document.getElementById("base_frequency");
+  const hours = document.getElementById("volunteer-hours");
+  const days = document.getElementById("volunteer-weekdays");
+  function showSchedule() {
+    if (!frequencySelect || !hours || !days) return;
+    const onDemand = frequencySelect.value === "ON_DEMAND";
+    hours.classList.remove("d-none");
+    days.classList.toggle("d-none", onDemand);
+  }
+  frequencySelect?.addEventListener("change", showSchedule);
+  showSchedule();
 
   document.querySelectorAll("[data-cancel-period]").forEach((button) => {
     button.addEventListener("click", async () => {

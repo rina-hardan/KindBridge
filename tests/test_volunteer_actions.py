@@ -254,9 +254,15 @@ def test_volunteer_edits_profile_and_manages_unavailability(app, client, engine)
     edit = client.get(f"/me/volunteer/{profile_id}")
     assert edit.status_code == 200
     body = edit.data.decode()
-    assert "פרופיל מתנדב" in body
-    assert "Five years with Magen David Adom" in body
+    assert "פרופיל מתנדב" not in body
+    assert "ההתנדבות שלי" in body
     assert "תאריכים שבהם אי אפשר לעזור" in body
+    assert "Five years with Magen David Adom" in body
+    assert 'id="from_date"' in body
+    assert 'id="until_date"' in body
+    assert 'id="experience"' not in body
+    assert 'id="has_vehicle"' not in body
+    assert 'id="base_frequency"' not in body
 
     saved = csrf_post(client, "/api/profile", _profile_body())
     assert saved.status_code == 200

@@ -622,10 +622,14 @@ def test_new_request_page_is_prefilled_from_the_profile(client):
     assert "איך העזרה מתבצעת".encode() not in form.data
     assert "כישורים נדרשים".encode() not in form.data
     assert "משך בדקות".encode() not in form.data
-    assert "תאריך מועדף".encode() in form.data
+    assert b'name="preferred_date"' not in form.data
+    assert b'class="col-12 d-none" id="preferred-weekdays-field"' in form.data
     assert "כמה פעמים צריך עזרה כזאת".encode() not in form.data
     assert b'frequency.value === "ON_DEMAND"' in form.data
     assert "משעה".encode() in form.data
+    assert "ימים מועדפים".encode() in form.data
+    assert "ראשון".encode() in form.data
+    assert "שני".encode() in form.data
 
 
 def test_submit_creates_a_pending_request_and_lists_it(client, engine):
@@ -674,6 +678,38 @@ def test_submit_creates_a_pending_request_and_lists_it(client, engine):
     assert errands.get_json()["total"] == 1
     assert transport.get_json()["total"] == 0
     assert other.status_code == 201
+
+
+def test_submit_stores_preferred_weekdays(client, engine):
+    enroll(client)
+
+    created = submit(client, preferred_weekdays=["MON", "SUN", "SUN"])
+
+    assert created.status_code == 201
+    request_id = created.get_json()["id"]
+    with engine.connect() as conn:
+        row = conn.execute(select(help_requests).where(help_requests.c.id == UUID(request_id))).one()
+        payload = json.loads(
+            conn.execute(
+                select(event_store.c.payload_json).where(
+                    event_store.c.aggregate_id == UUID(request_id),
+                    event_store.c.event_type == "HelpRequestCreated",
+                )
+            ).scalar_one()
+        )
+    assert payload["preferred_weekdays"] == ["SUN", "MON"]
+    assert json.loads(row.preferred_weekdays_json) == ["SUN", "MON"]
+
+
+def test_unknown_weekday_does_not_create_a_request(client, engine):
+    enroll(client)
+
+    response = submit(client, preferred_weekdays=["FUNDAY"])
+
+    assert response.status_code == 400
+    assert "preferred_weekdays" in response.get_json()["fields"]
+    with engine.connect() as conn:
+        assert conn.execute(select(help_requests)).first() is None
 
 
 def test_invalid_window_does_not_create_a_request(client, engine):

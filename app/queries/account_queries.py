@@ -64,11 +64,19 @@ class VolunteerProfileView:
     skills_text: str
     experience: str
     base_frequency: str
+    preferred_time_from: str | None
+    preferred_time_to: str | None
+    preferred_weekdays: tuple[str, ...]
     availability_status: str
     display_availability: str
     max_active_tasks: int
     max_parallel_tasks: int
     periods: tuple[UnavailabilityView, ...]
+
+
+# A want-to-do row stays off the volunteer screen while a placement is proposed,
+# assigned to this profile, or already completed.
+_HIDDEN_FROM_WANTED = ("PROPOSED", "ASSIGNED", "COMPLETED")
 
 
 class GetMyProfilesQuery:
@@ -79,9 +87,20 @@ class GetMyProfilesQuery:
         self._users = users
 
     def list_for(self, user_id: uuid.UUID, *, today: date | None = None) -> tuple[VolunteerProfileView, ...]:
-        today = today or date.today()
+        return self._listed(user_id, today or date.today(), wanted_only=False)
+
+    def list_wanted(self, user_id: uuid.UUID, *, today: date | None = None) -> tuple[VolunteerProfileView, ...]:
+        """Volunteerings still shown under "Volunteering you want to do"."""
+        return self._listed(user_id, today or date.today(), wanted_only=True)
+
+    def _listed(
+        self, user_id: uuid.UUID, today: date, *, wanted_only: bool
+    ) -> tuple[VolunteerProfileView, ...]:
         with self._engine.connect() as conn:
             profiles = self._users.list_volunteer_profiles(conn, user_id)
+            if wanted_only:
+                hidden = self._users.volunteer_profile_ids_with_status(conn, user_id, _HIDDEN_FROM_WANTED)
+                profiles = tuple(profile for profile in profiles if profile.profile_id not in hidden)
             periods = {
                 profile.profile_id: self._users.unavailability_periods(conn, profile.profile_id) for profile in profiles
             }
@@ -118,6 +137,9 @@ class GetMyProfilesQuery:
             skills_text=", ".join(profile.skills),
             experience=profile.experience,
             base_frequency=profile.base_frequency,
+            preferred_time_from=profile.preferred_time_from,
+            preferred_time_to=profile.preferred_time_to,
+            preferred_weekdays=profile.preferred_weekdays,
             availability_status=profile.availability_status,
             display_availability=display,
             max_active_tasks=profile.max_active_tasks,

@@ -66,6 +66,7 @@ class MatchProjector:
                 preferred_date=_date(payload.get("preferred_date")),
                 preferred_time_from=_clock_time(payload.get("preferred_time_from")),
                 preferred_time_to=_clock_time(payload.get("preferred_time_to")),
+                preferred_weekdays_json=_weekdays_json(payload.get("preferred_weekdays")),
                 estimated_duration_min=payload.get("estimated_duration_min"),
                 required_skills_json=skills_json,
                 requires_vehicle=bool(payload.get("requires_vehicle", False)),
@@ -284,6 +285,14 @@ def _date(value: Any) -> date | None:
     if isinstance(value, date):
         return value
     return date.fromisoformat(str(value)[:10])
+
+
+def _weekdays_json(value: Any) -> str | None:
+    if not value:
+        return None
+    if isinstance(value, str):
+        return value
+    return json.dumps(list(value), ensure_ascii=False)
 
 
 def _clock_time(value: Any) -> time | None:

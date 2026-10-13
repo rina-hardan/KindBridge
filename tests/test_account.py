@@ -162,6 +162,11 @@ def test_volunteer_area_opens_before_a_profile_exists(client, engine):
     assert "באיזו תדירות" in text
     assert "תאריכים שבהם אי אפשר לעזור" in text
     assert "אם לא רוצים לציין תאריכים מראש" in text
+    assert "משעה" in text
+    assert "עד שעה" in text
+    assert "ימים מועדפים" in text
+    assert 'class="col-12 d-none" id="volunteer-weekdays"' in text
+    assert 'hours.classList.remove("d-none")' in text
     assert "עיר שבה אפשר לעזור" not in text
 
     response = enable_volunteer(
@@ -200,6 +205,61 @@ def test_volunteer_area_opens_before_a_profile_exists(client, engine):
     textarea = blank_text.split('id="experience"', 1)[1].split("</textarea>", 1)[0]
     assert "עזרה לקשישים" not in textarea
     assert "פרופיל מתנדב" not in blank_text
+
+
+def test_volunteering_schedule_follows_frequency(client, engine):
+    register(client, VOLUNTEER)
+    login(client, VOLUNTEER["email"], VOLUNTEER["password"])
+
+    half = enable_volunteer(
+        client,
+        dict(VOLUNTEER_PROFILE, base_frequency="ON_DEMAND", preferred_time_from="09:00"),
+    )
+    assert half.status_code == 400
+    assert "preferred_time_to" in half.get_json()["fields"]
+
+    on_demand = enable_volunteer(
+        client,
+        dict(
+            VOLUNTEER_PROFILE,
+            base_frequency="ON_DEMAND",
+            experience="לפי הצורך בבוקר",
+            preferred_time_from="09:00",
+            preferred_time_to="12:30",
+            preferred_weekdays=["SUN"],
+        ),
+    )
+    assert on_demand.status_code == 201
+    weekly = enable_volunteer(
+        client,
+        dict(
+            VOLUNTEER_PROFILE,
+            base_frequency="WEEKLY",
+            experience="פעם בשבוע",
+            preferred_time_from="09:00",
+            preferred_time_to="12:30",
+            preferred_weekdays=["SUN", "WED"],
+        ),
+    )
+    assert weekly.status_code == 201
+
+    with engine.connect() as conn:
+        rows = conn.execute(select(volunteer_profiles).order_by(volunteer_profiles.c.experience)).all()
+    by_text = {row.experience: row for row in rows}
+    demand = by_text["לפי הצורך בבוקר"]
+    assert str(demand.preferred_time_from).startswith("09:00")
+    assert str(demand.preferred_time_to).startswith("12:30")
+    assert demand.preferred_weekdays_json is None
+    repeating = by_text["פעם בשבוע"]
+    assert str(repeating.preferred_time_from).startswith("09:00")
+    assert str(repeating.preferred_time_to).startswith("12:30")
+    assert json.loads(repeating.preferred_weekdays_json) == ["SUN", "WED"]
+
+    page = client.get(f"/me/volunteer/{weekly.get_json()['profile_id']}").data.decode()
+    assert 'id="from_date"' in page
+    assert 'id="experience"' not in page
+    assert 'id="volunteer-hours"' not in page
+    assert 'id="base_frequency"' not in page
 
 
 def test_volunteering_form_keeps_city_and_capacity(client, engine):

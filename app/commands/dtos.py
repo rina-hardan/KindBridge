@@ -7,7 +7,7 @@ from uuid import UUID
 from app.commands.bus import Command
 from app.domain.bilingual import split_skills
 from app.domain.errors import ValidationError
-from app.domain.requests import CATEGORIES, FREQUENCIES, URGENCIES
+from app.domain.requests import CATEGORIES, FREQUENCIES, URGENCIES, WEEKDAYS
 from app.security.passwords import password_problem
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -23,6 +23,9 @@ class VolunteerProfileInput:
     skills: tuple[str, ...]
     experience: str
     base_frequency: str
+    preferred_time_from: str | None
+    preferred_time_to: str | None
+    preferred_weekdays: tuple[str, ...]
     max_active_tasks: int | None
     max_parallel_tasks: int | None
 
@@ -236,6 +239,7 @@ class SubmitHelpRequestCommand(Command):
     preferred_date: str | None
     preferred_time_from: str | None
     preferred_time_to: str | None
+    preferred_weekdays: tuple[str, ...]
     requires_vehicle: bool
 
     @classmethod
@@ -251,6 +255,7 @@ class SubmitHelpRequestCommand(Command):
         frequency = _choice(data, "frequency", FREQUENCIES, errors)
         preferred_date = _optional_date(data, errors)
         time_from, time_to = _optional_window(data, errors)
+        preferred_weekdays = () if frequency == "ON_DEMAND" else _optional_weekdays(data, errors)
         requires_vehicle = data.get("requires_vehicle", False)
         if not isinstance(requires_vehicle, bool):
             errors["requires_vehicle"] = "Must be true or false"
@@ -268,6 +273,7 @@ class SubmitHelpRequestCommand(Command):
             preferred_date=preferred_date,
             preferred_time_from=time_from,
             preferred_time_to=time_to,
+            preferred_weekdays=preferred_weekdays,
             requires_vehicle=requires_vehicle,
         )
 
@@ -364,6 +370,23 @@ def _named_date(data: dict, field: str, errors: dict[str, str], *, required: boo
     except ValueError:
         errors[field] = "Enter a valid date"
         return None
+
+
+def _optional_weekdays(data: dict, errors: dict[str, str]) -> tuple[str, ...]:
+    raw = data.get("preferred_weekdays")
+    if raw is None or raw == "" or raw == []:
+        return ()
+    if not isinstance(raw, list):
+        errors["preferred_weekdays"] = "Choose days from the list"
+        return ()
+    chosen: list[str] = []
+    for item in raw:
+        if not isinstance(item, str) or item not in WEEKDAYS:
+            errors["preferred_weekdays"] = "Choose days from the list"
+            return ()
+        if item not in chosen:
+            chosen.append(item)
+    return tuple(day for day in WEEKDAYS if day in chosen)
 
 
 def _optional_window(data: dict, errors: dict[str, str]) -> tuple[str | None, str | None]:
@@ -533,6 +556,14 @@ def _volunteer_profile(raw: Any, errors: dict[str, str], prefix: str = "voluntee
     frequency = raw.get("base_frequency")
     if frequency not in BASE_FREQUENCIES:
         local["base_frequency"] = f"Must be one of {', '.join(BASE_FREQUENCIES)}"
+        time_from, time_to = None, None
+        weekdays: tuple[str, ...] = ()
+    elif frequency == "ON_DEMAND":
+        time_from, time_to = _optional_window(raw, local)
+        weekdays = ()
+    else:
+        time_from, time_to = _optional_window(raw, local)
+        weekdays = _optional_weekdays(raw, local)
 
     max_active = (
         None
@@ -554,6 +585,9 @@ def _volunteer_profile(raw: Any, errors: dict[str, str], prefix: str = "voluntee
         skills=skills,
         experience=experience,
         base_frequency=frequency,
+        preferred_time_from=time_from,
+        preferred_time_to=time_to,
+        preferred_weekdays=weekdays,
         max_active_tasks=max_active,
         max_parallel_tasks=max_parallel,
     )

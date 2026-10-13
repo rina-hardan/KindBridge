@@ -14,7 +14,7 @@ from app.commands.dtos import (
     UpdateVolunteerSkillsCommand,
 )
 from app.commands.request_commands import CompleteTaskCommand, ReleaseTaskCommand
-from app.domain.requests import ALL_STATUSES, CATEGORIES, FREQUENCIES, URGENCIES
+from app.domain.requests import ALL_STATUSES, CATEGORIES, FREQUENCIES, URGENCIES, WEEKDAYS
 from app.i18n import localize
 from app.queries.account_queries import AccountView, GetMyAccountQuery, GetMyProfilesQuery
 from app.queries.request_queries import GetRequesterDefaultsQuery
@@ -137,8 +137,9 @@ def volunteer_join_page():
         "account/volunteer_join.html",
         account=account,
         profile=None,
-        offers=_profiles_query().list_for(account.user_id, today=date.today()),
+        offers=_profiles_query().list_wanted(account.user_id, today=date.today()),
         period_error=notice,
+        weekdays=WEEKDAYS,
     )
 
 
@@ -160,8 +161,9 @@ def volunteer_edit_page(profile_id: UUID):
         "account/volunteer_join.html",
         account=account,
         profile=profile,
-        offers=_profiles_query().list_for(account.user_id, today=date.today()),
+        offers=_profiles_query().list_wanted(account.user_id, today=date.today()),
         period_error=notice,
+        weekdays=WEEKDAYS,
     )
 
 
@@ -219,6 +221,7 @@ def new_request_page():
         categories=CATEGORIES,
         urgencies=URGENCIES,
         frequencies=FREQUENCIES,
+        weekdays=WEEKDAYS,
     )
 
 
@@ -236,7 +239,7 @@ def tasks_page():
         page=_page_arg(),
         today=date.today(),
     )
-    profiles = _profiles_query().list_for(account.user_id, today=date.today())
+    profiles = _profiles_query().list_wanted(account.user_id, today=date.today())
     return render_template(
         "account/tasks_home.html",
         tasks=found,
@@ -307,6 +310,9 @@ def volunteer_profile_api():
         skills=profile.skills_text,
         experience=profile.experience,
         base_frequency=profile.base_frequency,
+        preferred_time_from=profile.preferred_time_from,
+        preferred_time_to=profile.preferred_time_to,
+        preferred_weekdays=list(profile.preferred_weekdays),
         availability_status=profile.availability_status,
         display_availability=profile.display_availability,
         max_active_tasks=profile.max_active_tasks,

@@ -46,6 +46,9 @@ class VolunteerProfileRecord:
     skills: tuple[str, ...]
     experience: str
     base_frequency: str
+    preferred_time_from: str | None
+    preferred_time_to: str | None
+    preferred_weekdays: tuple[str, ...]
     availability_status: str
     max_active_tasks: int
     max_parallel_tasks: int
@@ -164,6 +167,26 @@ class UserRepository:
         )
         return tuple(_volunteer_profile_record(row) for row in rows)
 
+    def volunteer_profile_ids_with_status(
+        self, conn: Connection, user_id: uuid.UUID, statuses: tuple[str, ...]
+    ) -> frozenset[uuid.UUID]:
+        if not statuses:
+            return frozenset()
+        rows = conn.execute(
+            select(task_assignments.c.volunteer_id)
+            .select_from(
+                task_assignments.join(
+                    volunteer_profiles, volunteer_profiles.c.id == task_assignments.c.volunteer_id
+                )
+            )
+            .where(
+                volunteer_profiles.c.user_id == user_id,
+                task_assignments.c.status.in_(statuses),
+            )
+            .distinct()
+        )
+        return frozenset(row.volunteer_id for row in rows)
+
     def volunteer_profile(self, conn: Connection, user_id: uuid.UUID) -> VolunteerProfileRecord | None:
         profiles = self.list_volunteer_profiles(conn, user_id)
         return None if not profiles else profiles[0]
@@ -276,11 +299,31 @@ def _volunteer_profile_record(row) -> VolunteerProfileRecord:
         skills=skills,
         experience=row.experience,
         base_frequency=row.base_frequency,
+        preferred_time_from=_hhmm(getattr(row, "preferred_time_from", None)),
+        preferred_time_to=_hhmm(getattr(row, "preferred_time_to", None)),
+        preferred_weekdays=_weekday_codes(getattr(row, "preferred_weekdays_json", None)),
         availability_status=row.availability_status,
         max_active_tasks=int(row.max_active_tasks),
         max_parallel_tasks=int(row.max_parallel_tasks),
         is_enabled=bool(row.is_enabled),
     )
+
+
+def _hhmm(value) -> str | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, str):
+        return value[:5]
+    return value.strftime("%H:%M")
+
+
+def _weekday_codes(value) -> tuple[str, ...]:
+    if not value:
+        return ()
+    raw = json.loads(value) if isinstance(value, str) else value
+    if not isinstance(raw, list):
+        return ()
+    return tuple(str(item) for item in raw)
 
 
 def _unavailability(row) -> UnavailabilityRecord:

@@ -1,7 +1,7 @@
 import json
 import uuid
 from collections.abc import Sequence
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 from typing import Any
 
 from sqlalchemy import Connection, insert, select, update
@@ -105,6 +105,9 @@ class UserProjector:
                 skills_json=json.dumps(p["skills"], ensure_ascii=False),
                 experience=p["experience"],
                 base_frequency=p["base_frequency"],
+                preferred_time_from=_clock_time(p.get("preferred_time_from")),
+                preferred_time_to=_clock_time(p.get("preferred_time_to")),
+                preferred_weekdays_json=_weekdays_json(p.get("preferred_weekdays")),
                 availability_status="AVAILABLE",
                 max_active_tasks=p["max_active_tasks"],
                 max_parallel_tasks=p["max_parallel_tasks"],
@@ -124,6 +127,9 @@ class UserProjector:
                 skills_json=json.dumps(payload["skills"], ensure_ascii=False),
                 experience=payload["experience"],
                 base_frequency=payload["base_frequency"],
+                preferred_time_from=_clock_time(payload.get("preferred_time_from")),
+                preferred_time_to=_clock_time(payload.get("preferred_time_to")),
+                preferred_weekdays_json=_weekdays_json(payload.get("preferred_weekdays")),
                 availability_status=payload["availability_status"],
                 max_active_tasks=int(payload["max_active_tasks"]),
                 max_parallel_tasks=int(payload["max_parallel_tasks"]),
@@ -176,6 +182,27 @@ class UserProjector:
         conn.execute(
             update(requester_profiles).where(requester_profiles.c.user_id == event.aggregate_id).values(**values)
         )
+
+
+def _weekdays_json(value: Any) -> str | None:
+    if not value:
+        return None
+    if isinstance(value, str):
+        return value
+    return json.dumps(list(value), ensure_ascii=False)
+
+
+def _clock_time(value: Any) -> time | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value.time()
+    if isinstance(value, time):
+        return value
+    text = str(value)
+    if len(text) == 5:
+        text += ":00"
+    return time.fromisoformat(text)
 
 
 def _calendar_date(value: Any) -> date:

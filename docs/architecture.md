@@ -167,8 +167,8 @@ All mutating routes: CSRF + JWT. Prefix `/`.
 | POST | `/api/me/account` | any authenticated | `UpdateAccountDetailsCommand` (email cannot change) |
 | GET | `/me/requester` | non-admin | requester enrollment view; redirects to `/me/requests` when a requester profile exists |
 | POST | `/api/me/requester` | non-admin | `UpdateRequesterProfileCommand` |
-| GET | `/me/volunteer` | non-admin | blank add-volunteering form. Vehicle, free text, frequency, and optional unavailability. No city field. Does not load a saved row |
-| GET | `/me/volunteer/<profile_id>` | non-admin | edit one of the caller's volunteerings. 404 when the row is not theirs |
+| GET | `/me/volunteer` | non-admin | blank add-volunteering form. Vehicle, free text, frequency, and optional unavailability. On demand shows an optional time window; every other frequency keeps that time window and also shows optional weekdays. No city field. Does not load a saved row |
+| GET | `/me/volunteer/<profile_id>` | non-admin | unavailability dates for one of the caller's volunteerings. Narrative, vehicle, frequency, and schedule are not on this screen. "My volunteering" returns to `/me/tasks`. Adding a period shows it for one second, then opens `/me/tasks`. 404 when the row is not theirs |
 | POST | `/api/me/volunteer` | non-admin | `EnableVolunteerProfileCommand`. Always inserts another profile |
 | GET | `/dashboard` | ADMIN | `GetAdminDashboardQuery` |
 | GET | `/me/requests` | non-admin | own-ticket table, including when there is no requester profile and no ticket. Does not redirect to enrollment |
@@ -189,14 +189,16 @@ There is no request-update route. Replacing a ticket means cancel, then submit a
 
 `urgency`: `LOW`, `NORMAL`, `HIGH`, `EMERGENCY`.
 
-`frequency`: `ON_DEMAND`, `WEEKLY`, `BIWEEKLY`, `MONTHLY`. Required on the create form.
+`frequency`: `ON_DEMAND`, `WEEKLY`, `BIWEEKLY`, `MONTHLY`. Required on the create form. On demand shows an optional time window. Every other frequency keeps that time window and also shows optional weekdays. The form does not ask for a preferred date.
+
+`preferred_weekdays`: optional list of `SUN`, `MON`, `TUE`, `WED`, `THU`, `FRI`, `SAT`. The create form shows them next to the time window when frequency is not `ON_DEMAND`. An empty list stores no preference.
 
 `required_skills` is not collected. New tickets store `[]`.
 | POST | `/api/requests/<id>/approve` | ADMIN | `ApproveAssignmentCommand` |
 | POST | `/api/requests/<id>/reject` | ADMIN | `RejectAssignmentCommand` |
 | POST | `/api/requests/<id>/override` | ADMIN | `OverrideAssignmentCommand` |
 | POST | `/api/requests/<id>/retrigger` | ADMIN | `RetriggerMatchCommand` |
-| GET | `/me/tasks` | non-admin | Volunteer area. Opens with or without a volunteer profile. `GetVolunteerTasksQuery` for the caller's own `ASSIGNED` and `COMPLETED` tasks (filter `status`, `page`) in the "took on" column. `GetMyProfilesQuery` lists every "want to do" row, each linking to its edit screen. Header always links to a blank `/me/volunteer` ("Add new volunteering"). Assigned rows offer Complete and Release |
+| GET | `/me/tasks` | non-admin | Volunteer area. Opens with or without a volunteer profile. `GetVolunteerTasksQuery` for the caller's own `ASSIGNED` and `COMPLETED` tasks (filter `status`, `page`) in the "took on" column. `GetMyProfilesQuery.list_wanted` lists "want to do" rows that have no `PROPOSED`, `ASSIGNED`, or `COMPLETED` assignment, each linking to its edit screen. A proposed profile leaves that column and returns after release, after another volunteer is assigned, after the request is cancelled, or when the proposal is rejected or retriggered. A completed task stays out of that column. Header always links to a blank `/me/volunteer` ("Add new volunteering"). Assigned rows offer Complete and Release |
 | GET | `/api/me/tasks` | VOLUNTEER | same query as JSON. Address and phone are returned only for `ASSIGNED` tasks, otherwise `null` |
 | GET | `/me/profile` | non-admin | redirects to `/me/volunteer` |
 | GET | `/api/me/profile` | VOLUNTEER | `GetMyProfilesQuery` as JSON, including open unavailability periods |

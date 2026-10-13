@@ -1,0 +1,30 @@
+<div class="col-12" id="volunteer-hours">
+  <div class="row g-3">
+    <div class="col-sm-6 col-md-4">
+      <label class="form-label" for="preferred_time_from">{{ t("requests.time_from") }}</label>
+      <input id="preferred_time_from" name="preferred_time_from" type="time" class="form-control" value="{{ profile.preferred_time_from if profile and profile.preferred_time_from else '' }}">
+      <div class="invalid-feedback" data-field="preferred_time_from"></div>
+    </div>
+    <div class="col-sm-6 col-md-4">
+      <label class="form-label" for="preferred_time_to">{{ t("requests.time_to") }}</label>
+      <input id="preferred_time_to" name="preferred_time_to" type="time" class="form-control" value="{{ profile.preferred_time_to if profile and profile.preferred_time_to else '' }}" aria-describedby="volunteer-time-help">
+      <div class="invalid-feedback" data-field="preferred_time_to"></div>
+    </div>
+    <div class="col-12">
+      <div id="volunteer-time-help" class="form-text">{{ t("requests.time_help") }}</div>
+    </div>
+  </div>
+</div>
+<div class="col-12 {% if not profile or profile.base_frequency == 'ON_DEMAND' %}d-none{% endif %}" id="volunteer-weekdays">
+  <p class="form-label mb-2" id="volunteer-weekdays-label">{{ t("requests.weekdays") }}</p>
+  <div class="invalid-feedback" data-field="preferred_weekdays"></div>
+  <div class="d-flex flex-wrap gap-3" role="group" aria-labelledby="volunteer-weekdays-label">
+    {% for code in weekdays %}
+    <div class="form-check mb-0">
+      <input class="form-check-input" type="checkbox" id="volunteer-weekday-{{ code }}" name="preferred_weekdays" value="{{ code }}" {% if profile and code in profile.preferred_weekdays %}checked{% endif %}>
+      <label class="form-check-label" for="volunteer-weekday-{{ code }}">{{ t("weekday." ~ code) }}</label>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="form-text">{{ t("requests.weekdays_help") }}</div>
+</div>

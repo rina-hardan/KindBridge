@@ -95,6 +95,9 @@ CREATE TABLE dbo.volunteer_profiles (
     skills_json NVARCHAR(MAX) NOT NULL,
     experience NVARCHAR(MAX) NOT NULL,
     base_frequency NVARCHAR(30) NOT NULL, -- WEEKLY, BIWEEKLY, MONTHLY, ON_DEMAND
+    preferred_time_from TIME NULL, -- set only when base_frequency is ON_DEMAND
+    preferred_time_to TIME NULL,
+    preferred_weekdays_json NVARCHAR(100) NULL, -- JSON array of SUN..SAT; only when base_frequency is not ON_DEMAND
     availability_status NVARCHAR(30) NOT NULL DEFAULT 'AVAILABLE', -- AVAILABLE, INACTIVE
     max_active_tasks INT NOT NULL DEFAULT 1,
     max_parallel_tasks INT NOT NULL DEFAULT 2,
@@ -117,6 +120,13 @@ WHERE kc.parent_object_id = OBJECT_ID(N''dbo.volunteer_profiles'')
   AND c.name = N''user_id'';
 IF @sql <> N'''' EXEC sp_executesql @sql;
 ';
+
+IF COL_LENGTH(N'dbo.volunteer_profiles', N'preferred_time_from') IS NULL
+    ALTER TABLE dbo.volunteer_profiles ADD preferred_time_from TIME NULL;
+IF COL_LENGTH(N'dbo.volunteer_profiles', N'preferred_time_to') IS NULL
+    ALTER TABLE dbo.volunteer_profiles ADD preferred_time_to TIME NULL;
+IF COL_LENGTH(N'dbo.volunteer_profiles', N'preferred_weekdays_json') IS NULL
+    ALTER TABLE dbo.volunteer_profiles ADD preferred_weekdays_json NVARCHAR(100) NULL;
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_volunteer_profiles_user' AND object_id = OBJECT_ID(N'dbo.volunteer_profiles'))
 CREATE INDEX IX_volunteer_profiles_user ON dbo.volunteer_profiles(user_id);
@@ -166,6 +176,7 @@ CREATE TABLE dbo.help_requests (
     preferred_date DATE NULL,
     preferred_time_from TIME NULL,
     preferred_time_to TIME NULL,
+    preferred_weekdays_json NVARCHAR(100) NULL, -- JSON array of SUN..SAT; NULL means no preference
     estimated_duration_min INT NULL,
     required_skills_json NVARCHAR(MAX) NOT NULL,
     requires_vehicle BIT NOT NULL DEFAULT 0,
@@ -178,6 +189,9 @@ CREATE TABLE dbo.help_requests (
 -- Older databases were created before cadence was stored. Existing rows stay one-off.
 IF COL_LENGTH(N'dbo.help_requests', N'frequency') IS NULL
     ALTER TABLE dbo.help_requests ADD frequency NVARCHAR(30) NOT NULL CONSTRAINT DF_help_requests_frequency DEFAULT 'ON_DEMAND';
+
+IF COL_LENGTH(N'dbo.help_requests', N'preferred_weekdays_json') IS NULL
+    ALTER TABLE dbo.help_requests ADD preferred_weekdays_json NVARCHAR(100) NULL;
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_help_requests_status' AND object_id = OBJECT_ID(N'dbo.help_requests'))
 CREATE INDEX IX_help_requests_status ON dbo.help_requests(status);

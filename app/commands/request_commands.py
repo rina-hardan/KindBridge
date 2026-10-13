@@ -165,6 +165,7 @@ class RequestCommandHandlers:
                 "preferred_date": cmd.preferred_date,
                 "preferred_time_from": cmd.preferred_time_from,
                 "preferred_time_to": cmd.preferred_time_to,
+                "preferred_weekdays": list(cmd.preferred_weekdays),
                 "estimated_duration_min": None,
                 "required_skills": [],
                 "requires_vehicle": cmd.requires_vehicle,

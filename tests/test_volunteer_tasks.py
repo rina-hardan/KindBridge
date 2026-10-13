@@ -295,6 +295,168 @@ def test_skills_endpoint_rejects_an_empty_list(client, engine):
     assert json.loads(row.skills_json) == ["first aid", "driving"]
 
 
+COMMITTED = "ליווי שבועי בבית אבות"
+STAYS = "קניות בשוק פעם בחודש"
+
+
+def _offer(client, experience: str, person=VOLUNTEER) -> UUID:
+    register(client, person)
+    response = _enable(client, {**VOLUNTEER_PROFILE, "experience": experience})
+    assert response.status_code == 201
+    return UUID(response.get_json()["profile_id"])
+
+
+def _wanted(client, path: str = "/me/tasks") -> str:
+    page = client.get(path)
+    assert page.status_code == 200
+    return page.data.decode()
+
+
+def _open_request(app, requester_id) -> UUID:
+    request_id = uuid4()
+    _append(app, request_id, 0, "HelpRequestCreated", _created_payload(requester_id, preferred_date=FUTURE), 1)
+    return request_id
+
+
+def test_a_proposed_volunteering_leaves_the_want_to_do_column(app, client):
+    requester_id = _requester(client)
+    profile_id = _offer(client, COMMITTED)
+    extra = csrf_post(client, "/api/me/volunteer", {**VOLUNTEER_PROFILE, "experience": STAYS, "base_frequency": "MONTHLY"})
+    assert extra.status_code == 201
+    request_id = _open_request(app, requester_id)
+    _propose(app, request_id, profile_id, uuid4())
+
+    tasks = _wanted(client)
+    form = _wanted(client, "/me/volunteer")
+
+    assert COMMITTED not in tasks
+    assert STAYS in tasks
+    assert COMMITTED not in form
+    assert STAYS in form
+
+    _append(
+        app,
+        request_id,
+        2,
+        "AssignmentsRejected",
+        {"volunteer_ids": [str(profile_id)], "reason": "not this time"},
+        3,
+    )
+
+    assert COMMITTED in _wanted(client)
+
+
+def test_release_returns_the_volunteering_to_the_want_to_do_column(app, client):
+    requester_id = _requester(client)
+    profile_id = _offer(client, COMMITTED)
+    request_id, assignment_id = _assign(app, requester_id, profile_id, description="Ride to the clinic")
+
+    hidden = _wanted(client)
+
+    assert COMMITTED not in hidden
+    assert "Ride to the clinic" in hidden
+
+    _append(
+        app,
+        request_id,
+        3,
+        "TaskReleased",
+        {"assignment_id": str(assignment_id), "reason": "cannot attend"},
+        4,
+    )
+    shown = _wanted(client)
+
+    assert COMMITTED in shown
+    assert "Ride to the clinic" not in shown
+
+
+def test_completing_a_task_keeps_the_volunteering_out_of_the_want_to_do_column(app, client):
+    requester_id = _requester(client)
+    profile_id = _offer(client, COMMITTED)
+    request_id, assignment_id = _assign(app, requester_id, profile_id, description="Ride to the clinic")
+    _append(app, request_id, 3, "TaskCompleted", {"assignment_id": str(assignment_id)}, 4)
+
+    text = _wanted(client)
+
+    assert COMMITTED not in text
+    assert "Ride to the clinic" in text
+
+
+def test_assigning_someone_else_returns_the_volunteering_to_the_want_to_do_column(app, client):
+    requester_id = _requester(client)
+    other_id = _offer(client, "מתנדב אחר", OTHER_VOLUNTEER)
+    profile_id = _offer(client, COMMITTED)
+    request_id = _open_request(app, requester_id)
+    mine, theirs = uuid4(), uuid4()
+    _append(
+        app,
+        request_id,
+        1,
+        "MatchesProposed",
+        {
+            "proposals": [
+                {
+                    "assignment_id": str(mine),
+                    "volunteer_id": str(profile_id),
+                    "score": 90,
+                    "rationale": "fit",
+                    "rank": 1,
+                },
+                {
+                    "assignment_id": str(theirs),
+                    "volunteer_id": str(other_id),
+                    "score": 80,
+                    "rationale": "also",
+                    "rank": 2,
+                },
+            ],
+            "match_attempt": 0,
+            "k": 2,
+        },
+        2,
+    )
+
+    assert COMMITTED not in _wanted(client)
+
+    _append(
+        app,
+        request_id,
+        2,
+        "AssignmentApproved",
+        {"assignment_id": str(theirs), "volunteer_id": str(other_id), "approved_by": str(uuid4())},
+        3,
+    )
+
+    assert COMMITTED in _wanted(client)
+
+
+def test_cancelling_an_assigned_request_returns_the_volunteering(app, client):
+    requester_id = _requester(client)
+    profile_id = _offer(client, COMMITTED)
+    request_id, _assignment_id = _assign(app, requester_id, profile_id, description="Ride to the clinic")
+
+    assert COMMITTED not in _wanted(client)
+
+    _append(app, request_id, 3, "HelpRequestCancelled", {"reason": "no longer needed"}, 4)
+
+    shown = _wanted(client)
+    assert COMMITTED in shown
+    assert "Ride to the clinic" not in shown
+
+
+def test_cancelling_a_proposed_request_returns_the_volunteering(app, client):
+    requester_id = _requester(client)
+    profile_id = _offer(client, COMMITTED)
+    request_id = _open_request(app, requester_id)
+    _propose(app, request_id, profile_id, uuid4())
+
+    assert COMMITTED not in _wanted(client)
+
+    _append(app, request_id, 2, "HelpRequestCancelled", {"reason": "no longer needed"}, 3)
+
+    assert COMMITTED in _wanted(client)
+
+
 def test_skills_endpoint_requires_login_and_the_volunteer_role(app, client):
     assert csrf_post(client, "/api/me/skills", {"skills": ["driving"]}).status_code == 401
 
