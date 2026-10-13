@@ -20,13 +20,13 @@ Follow this skill whenever you implement or change `ProposeMatchCommand`, `agent
 
 ## 2. Matching flow (one request, one match_attempt)
 
-Order is fixed. Do not filter the whole catalogue and then cut to 3.
+Order is fixed. Do not filter the whole catalogue and then cut to 3. The graph is a Deep Agent supervisor: `search_filter` runs steps 1–3, then `match_analysis` runs steps 4–7. If the delegation call is missing or fails, those same two graphs still run in this order.
 
 1. **Load** the request projection. When `resource_type` is `UNKNOWN`, classify it from the category and the description and store `ResourceTypeClassified`. Then, when `concurrency_type` is `UNKNOWN`, classify it from that resource type (`FLEXIBLE_REMOTE` → `PARALLEL_OK`, otherwise `EXCLUSIVE`, which is also how an unclassified `UNKNOWN` is treated) and store `ConcurrencyClassified`.
 2. **Retrieve (RAG):** embed `description + category + required_skills + frequency` (plus requester accessibility notes when present), query `volunteer_resumes` with `top_n = 15`. New tickets have an empty skill list.
 3. **Hard filter** only those 15 (drop, do not score). Checks from system-spec 4.2: inactive, self-assignment, exemption, declined on this request, unavailability period, geography (Hebrew and English names of a known city match), vehicle, capacity, schedule overlap. Similarity is not a check. There is no `SEMANTIC_FILTER_NO_OVERLAP`.
-4. **Capacity tool:** call `CheckVolunteerCapacityTool` for each remaining candidate; drop if `eligible = false`. `UNKNOWN` uses the `EXCLUSIVE` cap.
-5. **Travel tool:** call `CalculateTravelContextTool`; use its `feasibility`.
+4. **Capacity tool:** call `CheckVolunteerCapacityTool` over MCP for each remaining candidate; drop if `eligible = false`. `UNKNOWN` uses the `EXCLUSIVE` cap. One session serves the whole propose.
+5. **Travel tool:** call `CalculateTravelContextTool` over that same session; use its `feasibility`.
 6. **Web context (Tavily MCP):** city-level disruption query, timeout 8 s. On failure skip and set `web_lookup=skipped`. If the model flags `unsafe_travel`, multiply feasibility by 0.5.
 7. **Score and write:** rank everyone who survived, including a score of 0. Keep K = 3. On a first pass, zero candidates means `NoMatchFound` with a rejection summary (counts per check); otherwise `MatchesProposed`. On a refresh of `MATCH_PROPOSED`, write a new `MatchesProposed` with `updated: true` only when the ordered volunteer ids differ; supersede the previous `PROPOSED` rows and mail the admins once. The same ids, or an empty new pool, append nothing and send no mail.
 

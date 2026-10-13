@@ -46,7 +46,7 @@ flowchart LR
   vectorInfra --> chroma
   agentProc --> mcpTavily
   commands --> mcpGmail
-  agentProc --> mcpCustom
+  commands --> mcpCustom
 ```
 
 ---
@@ -125,9 +125,10 @@ agent/
   __init__.py
   main.py                     # process entry: python -m agent.main
   graph.py                    # Deep Agent graph
-  tools_mcp.py
-mcp_tools/                    # MCP Studio exported tools
+  tools_mcp.py                # MCP client for the Studio server
+mcp_tools/                    # MCP Studio server (stdio)
   __init__.py
+  server.py                   # python -m mcp_tools.server
   calculate_travel_context.py
   check_volunteer_capacity.py
 db/

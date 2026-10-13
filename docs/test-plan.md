@@ -2,7 +2,7 @@
 
 Rule: every new HTTP endpoint has at least one success test and one unauthorized/forbidden test (`tests/`).
 
-Stack: pytest + Flask test client + SQL Server test DB or LocalDB. Agent tests mock MCP.
+Stack: pytest + Flask test client + SQL Server test DB or LocalDB. Agent tests mock Tavily and Gmail. The Studio tools are called over MCP: matching tests use an in-process session, and one test launches the stdio server.
 
 ## Auth
 
@@ -66,5 +66,6 @@ Tests use `FakeNotifier`; nothing talks to Gmail.
 ## Agent
 
 - Tavily exception still produces a proposal if RAG+tools succeed (`web_lookup=skipped`).
+- A Studio tool that fails to answer leaves the request `PENDING_REVIEW` and writes no match event. The stdio server lists both tools and answers `CalculateTravelContextTool`. An in-process session reads capacity from the same engine, including a still-`UNKNOWN` remote request.
 - Idempotent propose: same `(request_id, match_attempt)` does not duplicate assignment rows.
 - Profile update changes Chroma document (fake client assertion).

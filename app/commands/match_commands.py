@@ -50,10 +50,9 @@ from app.infrastructure.llm import LLM_TIMEOUT_SECONDS, unsafe_travel
 from app.infrastructure.notification_service import NoNotifications, Notifications
 from app.infrastructure.vector_store import EmbeddingFailed, ResumeHit, ResumeVectorStore, VectorStoreUnavailable
 from app.projections.match_projector import MatchProjector
+from agent.tools_mcp import McpStudioClient, StudioTools
 from app.repositories.event_store import SqlEventStore
 from app.repositories.matching import SqlMatchingReader
-from mcp_tools.calculate_travel_context import calculate_travel_context
-from mcp_tools.check_volunteer_capacity import check_volunteer_capacity
 
 logger = logging.getLogger(__name__)
 
@@ -195,6 +194,7 @@ class MatchCommandHandlers:
         sleep: Callable[[float], None] | None = None,
         retrieval_attempts: int = _RETRIEVAL_ATTEMPTS,
         notifications: Notifications | None = None,
+        studio: StudioTools | None = None,
     ) -> None:
         self._engine = engine
         self._event_store = event_store
@@ -208,6 +208,7 @@ class MatchCommandHandlers:
         self._sleep = sleep or (lambda _seconds: None)
         self._retrieval_attempts = retrieval_attempts
         self._notifications = notifications or NoNotifications()
+        self._studio = studio if studio is not None else McpStudioClient(engine=engine)
         self._compiled = None
 
     def register_on(self, bus: CommandBus) -> None:
@@ -217,7 +218,10 @@ class MatchCommandHandlers:
         work = MatchWork(command=command)
         from agent.graph import invoke_match_graph
 
-        finished = invoke_match_graph(self, work)
+        try:
+            finished = invoke_match_graph(self, work)
+        finally:
+            self._studio.close()
         self._notify_admins(finished)
         return ProposeMatchResult(
             request_id=command.request_id,
@@ -355,33 +359,46 @@ class MatchCommandHandlers:
         work.candidates = _one_profile_per_person(work.candidates)
 
     def capacity(self, work: MatchWork) -> None:
-        if work.stop:
-            return
-        view = work.view
-        facts = work.facts
-        assert view is not None and facts is not None
-        kept: list[_Candidate] = []
-        for candidate in work.candidates:
-            result = check_volunteer_capacity(candidate.volunteer, view, facts.assigned)
-            if result["eligible"]:
-                kept.append(candidate)
-            else:
-                work.rejections.append(result["reason"] or "capacity")
-        work.candidates = kept
-
-    def travel(self, work: MatchWork) -> None:
-        if work.stop:
+        if work.stop or not work.candidates:
             return
         view = work.view
         assert view is not None
-        for candidate in work.candidates:
-            context = calculate_travel_context(
-                candidate.volunteer.primary_city,
-                view.city,
-                view.resource_type,
-            )
-            candidate.feasibility = float(context["feasibility"])
-            candidate.travel_note = str(context["note"])
+        kept: list[_Candidate] = []
+        try:
+            self._studio.open()
+            for candidate in work.candidates:
+                result = self._studio.check_capacity(str(candidate.volunteer.profile_id), str(view.request_id))
+                if result["eligible"]:
+                    kept.append(candidate)
+                else:
+                    work.rejections.append(result["reason"] or "capacity")
+        except Exception:
+            logger.exception("studio_tool_failed")
+            work.stop = True
+            work.outcome = "deferred"
+            return
+        work.candidates = kept
+
+    def travel(self, work: MatchWork) -> None:
+        if work.stop or not work.candidates:
+            return
+        view = work.view
+        assert view is not None
+        try:
+            self._studio.open()
+            for candidate in work.candidates:
+                context = self._studio.travel(
+                    candidate.volunteer.primary_city,
+                    view.city,
+                    view.resource_type,
+                )
+                candidate.feasibility = float(context["feasibility"])
+                candidate.travel_note = str(context["note"])
+        except Exception:
+            logger.exception("studio_tool_failed")
+            work.stop = True
+            work.outcome = "deferred"
+            return
 
     def web(self, work: MatchWork) -> None:
         if work.stop or not work.candidates:

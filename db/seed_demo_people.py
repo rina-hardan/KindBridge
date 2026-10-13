@@ -1,8 +1,11 @@
 """Add fictional requesters and volunteers, then propose matches for the new requests.
 
 Does not touch the admin or any account that already exists. Re-running skips an
-email that is already registered. A new request is matched in this run, so the
-admin can open ``/requests/<id>`` and see each volunteer's offer on the card.
+email that is already registered, writes that résumé into Chroma again, and checks
+the person's open request the same way the agent poll does. ``PENDING_REVIEW`` and
+``MATCH_PROPOSED`` are both searched. A request that already has proposals stays
+``MATCH_PROPOSED``: the same ordered volunteers leave the cards in place, and a
+different order replaces them. ``NO_MATCH`` is left alone until an admin retriggers.
 
     python -m db.seed_demo_people
 
@@ -26,7 +29,6 @@ from app.commands.dtos import (
     normalize_email,
 )
 from app.commands.match_commands import ProposeMatchCommand
-from app.commands.request_commands import RetriggerMatchCommand
 from app.config import Config, ConfigError
 from app.domain.errors import EmailAlreadyRegistered, ValidationError
 from app.repositories.tables import help_requests, task_assignments, users, volunteer_profiles
@@ -464,14 +466,7 @@ def _demo_request(services, email: str):
         ).first()
 
 
-def _admin_id(services):
-    with services.engine.connect() as conn:
-        row = conn.execute(select(users.c.id).where(users.c.is_admin.is_(True)).limit(1)).first()
-    return None if row is None else row.id
-
-
 def _propose(services, request_id) -> str:
-    row = None
     with services.engine.connect() as conn:
         row = conn.execute(
             select(help_requests.c.status, help_requests.c.match_attempt).where(help_requests.c.id == request_id)
@@ -480,21 +475,13 @@ def _propose(services, request_id) -> str:
         return "missing"
     status = row.status
     attempt = int(row.match_attempt)
-    if status in ("MATCH_PROPOSED", "NO_MATCH"):
-        admin_id = _admin_id(services)
-        if admin_id is None:
-            return f"left as {status}; no admin to retrigger"
-        services.bus.dispatch(RetriggerMatchCommand(request_id=request_id, actor_id=admin_id))
-        with services.engine.connect() as conn:
-            refreshed = conn.execute(
-                select(help_requests.c.match_attempt).where(help_requests.c.id == request_id)
-            ).first()
-        attempt = int(refreshed.match_attempt)
-        status = "PENDING_REVIEW"
-    if status != "PENDING_REVIEW":
+    if status not in ("PENDING_REVIEW", "MATCH_PROPOSED"):
         return f"left as {status}"
     result = services.bus.dispatch(ProposeMatchCommand(request_id=request_id, match_attempt=attempt))
-    return f"{result.outcome} ({result.proposed})"
+    with services.engine.connect() as conn:
+        after = conn.execute(select(help_requests.c.status).where(help_requests.c.id == request_id)).first()
+    later = after.status if after is not None else "missing"
+    return f"{status} -> {later}  {result.outcome} ({result.proposed})"
 
 
 def _print_matches(services, request_ids: list) -> None:
@@ -556,6 +543,10 @@ def main() -> int:
         if status == "skipped":
             skipped += 1
             print(f"קיים, דילוג: {person['full_name']} <{email}>")
+            _index_existing(services, email)
+            existing = _demo_request(services, email)
+            if existing is not None:
+                request_ids.append(existing.id)
             continue
         created += 1
         print(f"נוצר: {person['full_name']} <{email}>  בקשה {person['category']} ב{person['city']}")
@@ -563,7 +554,7 @@ def main() -> int:
             request_ids.append(request_id)
 
     if request_ids:
-        print("\nמתאים את הבקשות החדשות. בכרטיס תופיע הצעת המתנדב, לא הסבר הציון.")
+        print("\nבודק בקשות פתוחות, גם כאלה שכבר יש להן התאמה. בכרטיס תופיע הצעת המתנדב, לא הסבר הציון.")
         for request_id in request_ids:
             outcome = _propose(services, request_id)
             print(f"  {outcome}")

@@ -87,6 +87,8 @@ def build_services(
             if config.testing
             else ChromaVolunteerVectorStore(config.chroma_host, config.chroma_port)
         )
+    from agent.tools_mcp import McpStudioClient
+
     bus = CommandBus(event_store)
     encryptor = FieldEncryptor(config.encryption_key)
     notifier = notifier if notifier is not None else build_notifier(config)
@@ -120,6 +122,11 @@ def build_services(
         rationale=FallbackRationale(chat) if chat is not None else TemplateRationale(),
         sleep=(lambda _seconds: None) if config.testing else time.sleep,
         notifications=notifications,
+        studio=(
+            McpStudioClient(engine=engine)
+            if config.testing
+            else McpStudioClient(database_url=config.database_url)
+        ),
     ).register_on(bus)
     RequestCommandHandlers(
         engine=engine,

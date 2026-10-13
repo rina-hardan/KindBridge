@@ -19,7 +19,16 @@ ORDER BY CASE urgency WHEN 'EMERGENCY' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'NORMAL' T
 
 ## 2. Deep Agent graph
 
-Implementation: Deep Agents (LangChain) or equivalent LangGraph supervisor with sub-agents. Nodes:
+Implementation: `deepagents.create_deep_agent` supervises two compiled sub-agents. The seven stages below stay in this order. The supervisor does not score, approve, or assign.
+
+- **search_filter** runs stages 1–3 (load, retrieve, hard filter).
+- **match_analysis** runs stages 4–7 (capacity, travel, web, score and write). Each of those stages returns immediately when the request was already stopped.
+
+The general-purpose sub-agent is disabled, and filesystem tools are not offered to the supervisor, so it cannot read or write project files.
+
+The chat model is the one already configured by `LLM_PROVIDER` / `LLM_MODEL` (section 2.1). It may only delegate to these two sub-agents, in this order, and then stop. When no model is configured, the delegation call fails, or a sub-agent did not run, the process runs that sub-agent graph itself. A failed delegation never blocks a proposal and never changes the numeric score.
+
+Nodes:
 
 1. **Load**: request projection. If `resource_type` is `UNKNOWN`, classify it from the category and the description (system-spec delivery rules) and append `ResourceTypeClassified` before filtering. Then, if `concurrency_type` is `UNKNOWN`, classify it from that resource type and append `ConcurrencyClassified`. `FLEXIBLE_REMOTE` leans `PARALLEL_OK`; every other type, including a value that is still `UNKNOWN`, is `EXCLUSIVE`.
 2. **Retrieve (RAG)**: embed `description + category + required_skills + frequency`, plus the requester's accessibility notes when they exist. New tickets have an empty skill list. Query Chroma collection `volunteer_resumes`, `top_n = 15`. This happens before the hard filter. Do not take the top 3 and then filter them.
@@ -42,7 +51,7 @@ The score is computed by deterministic code (section 3), never by the LLM. The L
 1. Interpret the Tavily result and return `unsafe_travel: true|false` (structured JSON output).
 2. Write the `ai_rationale` text (max 500 chars) in simple Hebrew from the already-computed score components. The stored text still ends with `web_lookup=ok|skipped`. If the reply is empty or not Hebrew, keep the English template. The admin request screen does not show this text. Each proposed card shows the volunteer's offer from that profile, with the score and city.
 
-The LLM never ranks candidates, never changes a score, and never dispatches commands; the graph does.
+The LLM never ranks candidates, never changes a score, and never dispatches commands; the graph does. The supervisor's delegation call is not a third judgment: if it fails, the graph runs the two sub-agents in order (section 2).
 
 Model configuration (environment variables, documented in `.env.example`):
 
@@ -80,6 +89,16 @@ Collection `volunteer_resumes`: id = `volunteer_profile.id`, document = `experie
 On `VolunteerProfileEnabled` and `VolunteerProfileUpdated`: upsert. On deactivate: delete the vector (`delete_resume`). Access only through `app/infrastructure/vector_store.py`, which embeds with `EMBEDDING_PROVIDER` (`openai` → `text-embedding-3-small`, `local` → `all-MiniLM-L6-v2`) and talks to the Chroma **HTTP** server. If `EMBEDDING_PROVIDER=openai` but `OPENAI_API_KEY` is empty or still the `.env.example` placeholder, use the local model instead of calling OpenAI. A configured key whose API then fails is not this fallback: retry 3 times and leave the request `PENDING_REVIEW`. Do not open `./chroma_db` or any other local Chroma directory from the agent or from Flask.
 
 ## 5. MCP Studio tools (NFR 10)
+
+Both tools run in one FastMCP server: `python -m mcp_tools.server`, over stdio. `ProposeMatch` is the client (official `mcp` Python SDK), in the same style as Tavily. It opens one session for the proposal and closes it when the graph finishes. It does not start a process per candidate.
+
+`CheckVolunteerCapacityTool` loads the volunteer, the request, and assigned tasks by the two ids through `SqlMatchingReader`, then calls the same function the unit tests call. The classification events are written with the match result, so a projection that is still `UNKNOWN` is classified first, with the same rules as the command, and only then checked. A missing volunteer or request returns `eligible: false` and `reason: "capacity"`.
+
+`CalculateTravelContextTool` takes the three fields in the schema below and does not take a distance. Two different cities score feasibility `0.2`. The pure function still accepts `distance_km` so a unit test can cover the `0.6` band.
+
+If the server does not start, or a call fails, the proposal stops and the request stays for the next poll. No match event is written.
+
+Tests of `ProposeMatch` open an in-process MCP session on the same database engine, because the test database is in-memory SQLite. One test launches the stdio server.
 
 ### 5.1 `CalculateTravelContextTool`
 

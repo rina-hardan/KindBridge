@@ -79,11 +79,25 @@ class BrokenWeb:
         raise TimeoutError("tavily timed out")
 
 
+class _DownStudio:
+    def open(self) -> None:
+        raise RuntimeError("studio down")
+
+    def close(self) -> None:
+        return None
+
+    def check_capacity(self, volunteer_id: str, request_id: str) -> dict:
+        raise RuntimeError("studio down")
+
+    def travel(self, volunteer_city: str, request_city: str, resource_type: str) -> dict:
+        raise RuntimeError("studio down")
+
+
 def _hit(profile_id, similarity=1.0):
     return ResumeHit(profile_id=str(profile_id), similarity=similarity, document="resume", metadata={})
 
 
-def _handler(engine, clock, resumes, web=None):
+def _handler(engine, clock, resumes, web=None, studio=None):
     return MatchCommandHandlers(
         engine=engine,
         event_store=SqlEventStore(engine=engine),
@@ -93,6 +107,7 @@ def _handler(engine, clock, resumes, web=None):
         clock=clock,
         web=web,
         sleep=lambda _seconds: None,
+        studio=studio,
     )
 
 
@@ -452,6 +467,23 @@ def test_chroma_outage_leaves_the_request_pending(engine, clock):
     assert assignments == []
     assert [event.event_type for event in events] == ["HelpRequestCreated"]
     assert resumes.calls == [15, 15, 15]
+
+
+def test_studio_failure_leaves_the_request_pending(engine, clock):
+    requester = uuid4()
+    request_id = uuid4()
+    with engine.begin() as conn:
+        _user(conn, requester, "requester@example.com")
+        profile_id = _volunteer(conn)[1]
+    _open_request(engine, request_id, requester)
+
+    result = _propose(_handler(engine, clock, Catalog([_hit(profile_id)]), studio=_DownStudio()), request_id)
+
+    request, assignments, events = _rows(engine, request_id)
+    assert result.outcome == "deferred"
+    assert request["status"] == "PENDING_REVIEW"
+    assert assignments == []
+    assert [event.event_type for event in events] == ["HelpRequestCreated"]
 
 
 def test_exemption_uses_the_user_id(engine, clock):
