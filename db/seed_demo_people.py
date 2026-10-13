@@ -1,8 +1,8 @@
-"""Add fictional requesters and volunteers. New requests stay PENDING_REVIEW.
+"""Add fictional requesters and volunteers, then propose matches for the new requests.
 
-The running agent (``python -m agent.main``) proposes the match and sends the
-admin mail. Does not touch the admin or any account that already exists.
-Re-running skips an email that is already registered.
+Does not touch the admin or any account that already exists. Re-running skips an
+email that is already registered. A new request is matched in this run, so the
+admin can open ``/requests/<id>`` and see each volunteer's offer on the card.
 
     python -m db.seed_demo_people
 
@@ -316,6 +316,51 @@ PEOPLE = (
         "frequency": "ON_DEMAND",
         "requires_vehicle": False,
     },
+    {
+        "email": "adva.navon@kindbridge.demo",
+        "full_name": "אדוה נבון",
+        "phone": "050-1003001",
+        "city": "נתניה",
+        "home_address": "רחוב הרצל 14, נתניה",
+        "experience": "הצעת המתנדבת: אני מבשלת ארוחות חמות בנתניה ומביאה אותן עד הדלת, כולל מרק ועוף.",
+        "has_vehicle": False,
+        "base_frequency": "WEEKLY",
+        "category": "home_help",
+        "description": "צריכה מישהו שמבשל ארוחה חמה בנתניה ומביא אותה עד הדלת פעם בשבוע.",
+        "urgency": "NORMAL",
+        "frequency": "WEEKLY",
+        "requires_vehicle": False,
+    },
+    {
+        "email": "eitan.bar@kindbridge.demo",
+        "full_name": "איתן בר",
+        "phone": "050-1003002",
+        "city": "נתניה",
+        "home_address": "שדרות בן גוריון 8, נתניה",
+        "experience": "הצעת המתנדב: אני מכין תבשילים בבית בנתניה ומגיע עם קופסאות אוכל חמות.",
+        "has_vehicle": False,
+        "base_frequency": "WEEKLY",
+        "category": "home_help",
+        "description": "צריך ארוחה חמה בנתניה. מישהו שיבשל ויביא הביתה, בלי הסעה.",
+        "urgency": "HIGH",
+        "frequency": "WEEKLY",
+        "requires_vehicle": False,
+    },
+    {
+        "email": "rut.shalev@kindbridge.demo",
+        "full_name": "רות שלו",
+        "phone": "050-1003003",
+        "city": "נתניה",
+        "home_address": "רחוב ויצמן 3, נתניה",
+        "experience": "הצעת המתנדבת: יש לי ניסיון בבישול לקשישים בנתניה. אני מגיעה עם ארוחה מוכנה.",
+        "has_vehicle": False,
+        "base_frequency": "WEEKLY",
+        "category": "home_help",
+        "description": "מחפשת מתנדב שמכין אוכל חם בנתניה ומגיע איתו הביתה פעם בשבוע.",
+        "urgency": "NORMAL",
+        "frequency": "WEEKLY",
+        "requires_vehicle": False,
+    },
 )
 
 
@@ -460,6 +505,7 @@ def _print_matches(services, request_ids: list) -> None:
             users.c.full_name,
             volunteer_profiles.c.primary_city,
             task_assignments.c.request_id,
+            volunteer_profiles.c.experience,
             task_assignments.c.ai_score,
             task_assignments.c.rank_in_batch,
             task_assignments.c.status,
@@ -475,7 +521,11 @@ def _print_matches(services, request_ids: list) -> None:
     print("\nהצעות שנשמרו:")
     for row in rows:
         score = "" if row.ai_score is None else f"{float(row.ai_score):.0f}"
-        print(f"  בקשה {row.request_id}  דירוג {row.rank_in_batch}  {row.full_name} ({row.primary_city})  ציון {score}  {row.status}")
+        print(
+            f"  בקשה {row.request_id}  דירוג {row.rank_in_batch}  {row.full_name} ({row.primary_city})  "
+            f"ציון {score}  {row.status}"
+        )
+        print(f"    הצעה: {row.experience}")
 
 
 def main() -> int:
@@ -513,9 +563,12 @@ def main() -> int:
             request_ids.append(request_id)
 
     if request_ids:
-        print("\nהבקשות החדשות ממתינות לסוכן. הוא שולח את המייל כשהוא מסיים התאמה.")
+        print("\nמתאים את הבקשות החדשות. בכרטיס תופיע הצעת המתנדב, לא הסבר הציון.")
         for request_id in request_ids:
-            print(f"  {request_id}")
+            outcome = _propose(services, request_id)
+            print(f"  {outcome}")
+            print(f"  {config.app_base_url}/requests/{request_id}")
+        _print_matches(services, request_ids)
 
     print(f"\nנוספו {created}, דולגו {skipped}.")
     if created:

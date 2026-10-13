@@ -39,7 +39,7 @@ HITL: graph **stops** after writing proposals. Approve/reject is only HTTP/admin
 The score is computed by deterministic code (section 3), never by the LLM. The LLM is used for exactly two things:
 
 1. Interpret the Tavily result and return `unsafe_travel: true|false` (structured JSON output).
-2. Write the `ai_rationale` text (max 500 chars) in simple Hebrew from the already-computed score components. The stored text still ends with `web_lookup=ok|skipped`. If the reply is empty or not Hebrew, keep the English template. The admin request screen phrases either form in the viewer's language and does not show the raw token.
+2. Write the `ai_rationale` text (max 500 chars) in simple Hebrew from the already-computed score components. The stored text still ends with `web_lookup=ok|skipped`. If the reply is empty or not Hebrew, keep the English template. The admin request screen does not show this text. Each proposed card shows the volunteer's offer from that profile, with the score and city.
 
 The LLM never ranks candidates, never changes a score, and never dispatches commands; the graph does.
 

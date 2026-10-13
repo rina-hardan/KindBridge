@@ -88,6 +88,7 @@ class VolunteerCard:
     city: str
     score_label: str | None
     rationale: str | None
+    offer: str
 
 
 @dataclass(frozen=True)
@@ -271,6 +272,7 @@ def _card(row) -> VolunteerCard:
         city=row.city,
         score_label=_score_label(row.score),
         rationale=row.rationale or None,
+        offer=row.offer,
     )
 
 
