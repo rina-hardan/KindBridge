@@ -9,12 +9,13 @@ Poll every 15s:
 ```sql
 SELECT TOP 10 id, match_attempt, status
 FROM help_requests
-WHERE status IN ('PENDING_REVIEW')
+WHERE status IN ('PENDING_REVIEW', 'MATCH_PROPOSED')
 ORDER BY CASE urgency WHEN 'EMERGENCY' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'NORMAL' THEN 2 ELSE 3 END,
+         CASE status WHEN 'PENDING_REVIEW' THEN 0 ELSE 1 END,
          created_at;
 ```
 
-For each row, dispatch `ProposeMatchCommand` **once** per `match_attempt` using idempotency key `propose:{id}:{match_attempt}`.
+`ASSIGNED`, `NO_MATCH`, `COMPLETED`, and `CANCELLED` stay out of this query. A request that already has a proposal is checked again on every poll until an admin assigns it (or it leaves `MATCH_PROPOSED` another way). For each row, dispatch `ProposeMatchCommand` for the current `match_attempt` using idempotency key `propose:{id}:{match_attempt}`.
 
 ## 2. Deep Agent graph
 
@@ -26,7 +27,7 @@ Implementation: Deep Agents (LangChain) or equivalent LangGraph supervisor with 
 4. **Capacity tool (MCP Studio)**: `CheckVolunteerCapacityTool` on each survivor. `UNKNOWN` uses the exclusive cap (`current_active_tasks < max_active_tasks`). `PARALLEL_OK` uses `current_parallel_tasks < max_parallel_tasks`.
 5. **Travel tool (MCP Studio)**: `CalculateTravelContextTool`.
 6. **Web (Tavily MCP)**: city-level context (weather disruption, transit strike, municipal holiday). Timeout 8s; on failure skip.
-7. **Score & write**: rank everyone still eligible, including score 0; take **K = 3**. Zero candidates -> `NoMatchFound` with `rejection_summary` (counts per check). Otherwise `MatchesProposed`. Both events go through `ProposeMatchCommand` (`app/commands/match_commands.py`). The agent does not approve or assign.
+7. **Score & write**: rank everyone still eligible, including score 0; take **K = 3**. On a first pass (`PENDING_REVIEW`), zero candidates -> `NoMatchFound` with `rejection_summary` (counts per check). Otherwise `MatchesProposed`. On a refresh (`MATCH_PROPOSED`), compare the new ordered volunteer ids with the open `PROPOSED` rows. The same people in the same order, or an empty new pool, appends nothing and sends no mail; `match_attempt` stays put so the next poll checks again. A different order appends `MatchesProposed` with `updated: true`, supersedes the previous `PROPOSED` rows, leaves the status `MATCH_PROPOSED`, and mails the admins once. Both events go through `ProposeMatchCommand` (`app/commands/match_commands.py`). The agent does not approve or assign.
 
 `exemption_links.volunteer_id` is `users.id`. `task_assignments.volunteer_id` and `volunteer_unavailability.volunteer_id` are `volunteer_profiles.id`. Comparing a profile id to an exemption row will not exclude anyone.
 
@@ -39,7 +40,7 @@ HITL: graph **stops** after writing proposals. Approve/reject is only HTTP/admin
 The score is computed by deterministic code (section 3), never by the LLM. The LLM is used for exactly two things:
 
 1. Interpret the Tavily result and return `unsafe_travel: true|false` (structured JSON output).
-2. Write the `ai_rationale` text (max 500 chars) in simple Hebrew from the already-computed score components. The stored text still ends with `web_lookup=ok|skipped`. If the reply is empty or not Hebrew, keep the English template. The admin request screen phrases either form in the viewer's language and does not show the raw token.
+2. Write the `ai_rationale` text (max 500 chars) in simple Hebrew from the already-computed score components. The stored text still ends with `web_lookup=ok|skipped`. If the reply is empty or not Hebrew, keep the English template. The admin request screen does not show this text. Each proposed card shows the volunteer's offer from that profile, with the score and city.
 
 The LLM never ranks candidates, never changes a score, and never dispatches commands; the graph does.
 
@@ -53,7 +54,7 @@ Model configuration (environment variables, documented in `.env.example`):
 
 The chosen provider and model must be written in the project `README.md`.
 
-If the LLM call fails, exceeds 10s, or does not return Hebrew: use a template rationale (top two score components + travel summary) and `unsafe_travel = false`. A failed LLM call never blocks proposals.
+Each LLM call waits 90s. An Ollama call also stops after 256 generated tokens, so a local model returns a short answer inside that wait instead of running until the clock expires. If the call fails, exceeds 90s, or does not return Hebrew: use a template rationale (top two score components + travel summary) and `unsafe_travel = false`. A failed LLM call never blocks proposals.
 
 ## 3. Score formula (`ai_score` 0-100)
 
@@ -160,7 +161,7 @@ class Notifier(Protocol):
 | `AssignmentOverridden` | Flask | assigned volunteer and requester |
 | `HelpRequestCancelled`, only when the status was `ASSIGNED` | Flask | the assigned volunteer |
 | `TaskReleased` | Flask | requester and admin(s), via `ReleaseTaskCommand` |
-| `MatchesProposed` | **agent** | admin(s): "New match proposal waiting for review" with request id, category, city, urgency, the top candidates (name and `ai_score`), and a link to `/requests/<id>` |
+| `MatchesProposed` | **agent** | admin(s): "New match proposal waiting for review" with request id, category, city, urgency, the top candidates (name and `ai_score`), and a link to `/requests/<id>`. When the payload has `updated: true`, the subject and intro say the proposal was updated |
 | `NoMatchFound` | **agent** | admin(s): the same facts plus the `rejection_summary` |
 
-**Idempotency of the admin mail.** `ProposeMatchCommand` is idempotent per `(request_id, match_attempt)`. The mail is sent only by the run that actually appended `MatchesProposed` or `NoMatchFound`; a repeated poll of the same attempt is a no-op and sends nothing. A proposal that fails to commit (for example a concurrency conflict) sends nothing.
+**Idempotency of the admin mail.** `ProposeMatchCommand` is idempotent per `(request_id, match_attempt)`. The mail is sent only by the run that actually appended `MatchesProposed` or `NoMatchFound`; a repeated poll of the same attempt is a no-op and sends nothing. A refresh that finds the same ordered volunteers also appends nothing and sends nothing. A proposal that fails to commit (for example a concurrency conflict) sends nothing.

@@ -47,10 +47,14 @@ class SqlMatchingReader:
             (help_requests.c.urgency == "NORMAL", 2),
             else_=3,
         )
+        status_order = case(
+            (help_requests.c.status == "PENDING_REVIEW", 0),
+            else_=1,
+        )
         stmt = (
             select(help_requests.c.id, help_requests.c.match_attempt)
-            .where(help_requests.c.status == "PENDING_REVIEW")
-            .order_by(urgency_order, help_requests.c.created_at)
+            .where(help_requests.c.status.in_(("PENDING_REVIEW", "MATCH_PROPOSED")))
+            .order_by(urgency_order, status_order, help_requests.c.created_at)
             .limit(limit)
         )
         return [

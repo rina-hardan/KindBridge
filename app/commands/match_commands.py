@@ -3,7 +3,9 @@
 Flow for one request and one match_attempt:
 embed the request, retrieve 15 résumés, hard-filter that set, then score it.
 The numeric score is deterministic. The command appends MatchesProposed or
-NoMatchFound and does not approve or assign.
+NoMatchFound and does not approve or assign. A request that already has a
+proposal is scored again; a new event is written only when the ordered
+volunteers change.
 """
 
 import logging
@@ -44,7 +46,7 @@ from app.domain.matching import (
     score_candidate,
     skill_overlap,
 )
-from app.infrastructure.llm import unsafe_travel
+from app.infrastructure.llm import LLM_TIMEOUT_SECONDS, unsafe_travel
 from app.infrastructure.notification_service import NoNotifications, Notifications
 from app.infrastructure.vector_store import EmbeddingFailed, ResumeHit, ResumeVectorStore, VectorStoreUnavailable
 from app.projections.match_projector import MatchProjector
@@ -158,7 +160,7 @@ class FallbackRationale:
                 "and the travel note. Do not mention a numeric score, chain-of-thought, "
                 "or the words web_lookup. At most 500 characters.\n"
                 + draft,
-                timeout=10,
+                timeout=LLM_TIMEOUT_SECONDS,
             )
         except Exception:
             logger.exception("llm_rationale_failed")
@@ -415,7 +417,7 @@ class MatchCommandHandlers:
         request = work.request
         assert view is not None and request is not None
         today = self._today()
-        scored: list[ScoredVolunteer] = []
+        prepared: list[tuple[_Candidate, float, dict[str, float]]] = []
         for candidate in work.candidates:
             volunteer = candidate.volunteer
             score, parts = score_candidate(
@@ -429,20 +431,39 @@ class MatchCommandHandlers:
                 today=today,
                 request_frequency=view.frequency,
             )
+            prepared.append((candidate, score, parts))
+        ranked = rank_proposals(
+            [
+                ScoredVolunteer(
+                    volunteer_id=candidate.volunteer.profile_id,
+                    score=score,
+                    similarity=candidate.similarity,
+                    rationale="",
+                )
+                for candidate, score, _parts in prepared
+            ]
+        )
+        refreshing = request.status == "MATCH_PROPOSED"
+        if refreshing and not _proposal_changed(request, ranked):
+            work.outcome = "unchanged"
+            return
+        by_id = {candidate.volunteer.profile_id: (candidate, score, parts) for candidate, score, parts in prepared}
+        chosen: list[ScoredVolunteer] = []
+        for item in ranked:
+            candidate, score, parts = by_id[item.volunteer_id]
             try:
                 rationale = self._rationale.write(parts, candidate.travel_note, work.web_lookup)
             except Exception:
                 logger.exception("llm_rationale_failed")
                 rationale = render_rationale(parts, candidate.travel_note, work.web_lookup)
-            scored.append(
+            chosen.append(
                 ScoredVolunteer(
-                    volunteer_id=volunteer.profile_id,
+                    volunteer_id=item.volunteer_id,
                     score=score,
                     similarity=candidate.similarity,
                     rationale=rationale[:500],
                 )
             )
-        chosen = rank_proposals(scored)
         payloads: list[tuple[str, dict]] = []
         if work.resource_classification is not None:
             kind, reason = work.resource_classification
@@ -485,6 +506,7 @@ class MatchCommandHandlers:
                         ],
                         "match_attempt": work.command.match_attempt,
                         "k": min(PROPOSAL_LIMIT, len(chosen)),
+                        **({"updated": True} if refreshing else {}),
                     },
                 )
             )
@@ -519,6 +541,17 @@ class MatchCommandHandlers:
 
     def _today(self):
         return self._clock().date()
+
+
+def _proposal_changed(request: HelpRequest, ranked: list[ScoredVolunteer]) -> bool:
+    """A refresh is worth storing when the ordered volunteers differ.
+
+    The same people in the same order are not a new proposal, even if a score
+    moved. An empty new pool leaves the current proposals in place.
+    """
+    current = [item.volunteer_id for item in request.proposals if item.status == "PROPOSED"]
+    proposed = [item.volunteer_id for item in ranked]
+    return bool(proposed) and proposed != current
 
 
 def _one_profile_per_person(candidates: list[_Candidate]) -> list[_Candidate]:

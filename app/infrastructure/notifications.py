@@ -61,6 +61,8 @@ _TEXT = {
         "review": "לטיפול:",
         "proposed_subject": "הצעת התאמה חדשה ממתינה לבדיקה",
         "proposed_intro": "הסוכן הציע מתנדבים לבקשה, וההצעה ממתינה לאישור מנהל.",
+        "proposed_updated_subject": "הצעת ההתאמה עודכנה וממתינה לבדיקה",
+        "proposed_updated_intro": "הסוכן מצא התאמות מתאימות יותר. ההצעה הקודמת הוחלפה, וההצעה המעודכנת ממתינה לאישור מנהל.",
         "candidates": "מועמדים מובילים:",
         "score": "ציון",
         "no_match_subject": "לא נמצאה התאמה לבקשה, נדרשת בדיקה",
@@ -106,6 +108,8 @@ _TEXT = {
         "review": "Review it here:",
         "proposed_subject": "New match proposal waiting for review",
         "proposed_intro": "The agent proposed volunteers for a request. An admin needs to review the proposal.",
+        "proposed_updated_subject": "Updated match proposal waiting for review",
+        "proposed_updated_intro": "The agent found a more suitable match. The previous proposal was replaced, and the updated proposal is waiting for an admin.",
         "candidates": "Top candidates:",
         "score": "score",
         "no_match_subject": "No match found for a request, review needed",
@@ -229,14 +233,21 @@ def released_to_admin(
 
 
 def matches_proposed_to_admin(
-    request: RequestInfo, candidates: Sequence[Candidate], link: str, lang: str = "he"
+    request: RequestInfo,
+    candidates: Sequence[Candidate],
+    link: str,
+    lang: str = "he",
+    *,
+    updated: bool = False,
 ) -> MailContent:
     lines = [
         f"{rank}. {_one_line(item.name)} ({_t(lang, 'score')} {item.score:.0f})"
         for rank, item in enumerate(candidates, start=1)
     ]
+    intro = "proposed_updated_intro" if updated else "proposed_intro"
+    subject = "proposed_updated_subject" if updated else "proposed_subject"
     body = [
-        _t(lang, "proposed_intro"),
+        _t(lang, intro),
         *_facts(lang, request, with_id=True),
         "",
         _t(lang, "candidates"),
@@ -245,7 +256,7 @@ def matches_proposed_to_admin(
         _t(lang, "review"),
         link,
     ]
-    return MailContent(_subject(lang, "proposed_subject"), "\n".join(body))
+    return MailContent(_subject(lang, subject), "\n".join(body))
 
 
 def no_match_to_admin(

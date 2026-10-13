@@ -162,7 +162,9 @@ class NotificationService:
         info = _info(view)
         link = self._request_link(request_id)
         if event_type == MATCHES_PROPOSED:
-            mail = mails.matches_proposed_to_admin(info, candidates, link, _LANG)
+            mail = mails.matches_proposed_to_admin(
+                info, candidates, link, _LANG, updated=bool(payload.get("updated"))
+            )
         else:
             summary = payload.get("rejection_summary")
             mail = mails.no_match_to_admin(info, summary if isinstance(summary, dict) else {}, link, _LANG)

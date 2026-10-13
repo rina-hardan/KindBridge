@@ -1,4 +1,4 @@
-"""Admin dashboard: open-request counters, the queue, and volunteer capacity."""
+"""Admin dashboard: open-request counters, match distribution, the queue, and volunteer capacity."""
 
 from dataclasses import dataclass
 from datetime import date
@@ -23,6 +23,30 @@ class StatusCounts:
             ("NO_MATCH", self.no_match),
             ("ASSIGNED", self.assigned),
         )
+
+
+@dataclass(frozen=True)
+class MatchDistribution:
+    proposed: int
+    assigned: int
+    declined: int
+    completed: int
+    superseded: int
+
+    def as_rows(self) -> tuple[tuple[str, int], ...]:
+        return (
+            ("PROPOSED", self.proposed),
+            ("ASSIGNED", self.assigned),
+            ("DECLINED", self.declined),
+            ("COMPLETED", self.completed),
+            ("SUPERSEDED", self.superseded),
+        )
+
+    def share(self, count: int) -> int:
+        peak = max(value for _, value in self.as_rows())
+        if peak == 0:
+            return 0
+        return round(100 * count / peak)
 
 
 @dataclass(frozen=True)
@@ -56,6 +80,7 @@ class CapacityGauges:
 @dataclass(frozen=True)
 class AdminDashboard:
     counts: StatusCounts
+    matches: MatchDistribution
     requests: tuple[QueueRow, ...]
     gauges: CapacityGauges
     page: int
@@ -78,12 +103,20 @@ class GetAdminDashboardQuery:
         today = today or date.today()
         snapshot = self._reader.load(page=max(page, 1), page_size=PAGE_SIZE, today=today)
         counts = snapshot.status_counts
+        matches = snapshot.match_counts
         return AdminDashboard(
             counts=StatusCounts(
                 pending_review=counts.get("PENDING_REVIEW", 0),
                 match_proposed=counts.get("MATCH_PROPOSED", 0),
                 no_match=counts.get("NO_MATCH", 0),
                 assigned=counts.get("ASSIGNED", 0),
+            ),
+            matches=MatchDistribution(
+                proposed=matches.get("PROPOSED", 0),
+                assigned=matches.get("ASSIGNED", 0),
+                declined=matches.get("DECLINED", 0),
+                completed=matches.get("COMPLETED", 0),
+                superseded=matches.get("SUPERSEDED", 0),
             ),
             requests=tuple(
                 QueueRow(

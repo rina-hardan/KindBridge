@@ -18,6 +18,7 @@ Stack: pytest + Flask test client + SQL Server test DB or LocalDB. Agent tests m
 - The owner's list defaults to open statuses. Cancel from `PENDING_REVIEW` sets `CANCELLED` and drops the row from that default list. Another requester canceling it receives 403.
 - Propose with three eligible volunteers writes K≤3 `PROPOSED` and status `MATCH_PROPOSED`.
 - Propose with empty pool → `NO_MATCH`.
+- While `MATCH_PROPOSED`, the agent polls the request again. The same ordered volunteers append nothing and send no mail. A different order appends `MatchesProposed` with `updated: true`, supersedes the previous `PROPOSED` rows, stays `MATCH_PROPOSED`, and mails the admins once. An empty refresh keeps the current proposals. `ASSIGNED` is not polled.
 - Reject blacklists those volunteer ids; second propose must not include them.
 - Approve one: siblings `SUPERSEDED`; volunteer `current_active_tasks` +1; address visible to that volunteer only.
 - Second concurrent approve → 409.
@@ -49,7 +50,7 @@ Tests use `FakeNotifier`; nothing talks to Gmail.
 - Approve and override send two mails: the assigned volunteer and the requester. The mails hold no phone number or address.
 - Cancel from `ASSIGNED` mails the volunteer only. Cancel from `PENDING_REVIEW`, or with an unapproved proposal, sends nothing. A rejected approve sends nothing.
 - `MatchesProposed` mails every active admin (not inactive ones) with the request facts and the candidates in rank order; `NoMatchFound` adds the rejection summary. `ADMIN_NOTIFY_EMAIL` narrows the list only to an admin that exists in the database.
-- A second `ProposeMatchCommand` for the same `(request_id, match_attempt)` is a no-op and sends no second mail. A proposal that fails to commit sends none.
+- A second `ProposeMatchCommand` for the same `(request_id, match_attempt)` is a no-op and sends no second mail. A refresh with the same ordered volunteers sends no mail. A refresh whose ordered volunteers changed sends one updated mail. A proposal that fails to commit sends none.
 - A notifier that raises, and a failure while resolving recipients, never raise into the command and never roll back events (approve, cancel, propose).
 - Recipients come only from the database: an unknown volunteer profile or request produces no mail.
 - `GmailMcpNotifier`: 3 attempts with backoff then `notify_failed` with no secret and a masked address; a permanent error is not retried; malformed addresses are never sent; nothing is launched without a stored token; works inside a running event loop.

@@ -28,9 +28,9 @@ Order is fixed. Do not filter the whole catalogue and then cut to 3.
 4. **Capacity tool:** call `CheckVolunteerCapacityTool` for each remaining candidate; drop if `eligible = false`. `UNKNOWN` uses the `EXCLUSIVE` cap.
 5. **Travel tool:** call `CalculateTravelContextTool`; use its `feasibility`.
 6. **Web context (Tavily MCP):** city-level disruption query, timeout 8 s. On failure skip and set `web_lookup=skipped`. If the model flags `unsafe_travel`, multiply feasibility by 0.5.
-7. **Score and write:** rank everyone who survived, including a score of 0. Keep K = 3. Zero candidates means `NoMatchFound` with a rejection summary (counts per check); otherwise `MatchesProposed`.
+7. **Score and write:** rank everyone who survived, including a score of 0. Keep K = 3. On a first pass, zero candidates means `NoMatchFound` with a rejection summary (counts per check); otherwise `MatchesProposed`. On a refresh of `MATCH_PROPOSED`, write a new `MatchesProposed` with `updated: true` only when the ordered volunteer ids differ; supersede the previous `PROPOSED` rows and mail the admins once. The same ids, or an empty new pool, append nothing and send no mail.
 
-Stop after writing. Never approve or assign; that is the admin's decision.
+The poll also selects `MATCH_PROPOSED` and re-checks it until the request is assigned. Stop after writing. Never approve or assign; that is the admin's decision.
 
 Ids: `exemption_links.volunteer_id` is `users.id`. Assignments and unavailability use `volunteer_profiles.id`. Overlap is allowed only when both tasks are `PARALLEL_OK`.
 
@@ -52,12 +52,12 @@ If `preferred_date` is before today, multiply by 0.85. The score is computed by 
 ## 4. Role of the LLM
 
 - Interprets Tavily results (is travel unsafe today?).
-- Writes the `ai_rationale` (max 500 characters) in simple Hebrew: top two score components, travel summary, and `web_lookup=ok|skipped`. A reply that is not Hebrew keeps the English template. The admin screen phrases it in the screen language and does not show the raw token.
+- Writes the `ai_rationale` (max 500 characters) in simple Hebrew: top two score components, travel summary, and `web_lookup=ok|skipped`. A reply that is not Hebrew keeps the English template. The admin screen does not show this text; each proposed card shows the volunteer's offer.
 - Never outputs raw chain-of-thought and never changes the numeric score.
 
 ## 5. Invariants
 
-- Idempotency key `propose:{request_id}:{match_attempt}`. A duplicate Propose is a no-op.
+- Idempotency key `propose:{request_id}:{match_attempt}`. A duplicate Propose is a no-op. A refresh that does not change the ordered volunteers does not consume `match_attempt` and does not mail.
 - `MatchesProposed` payload: array of `{volunteer_id, score, rationale, rank}`, plus `match_attempt` and `k`. `volunteer_id` is `volunteer_profiles.id`. Each proposal also carries `assignment_id` so rebuild does not invent keys.
 - `NoMatchFound` payload: `match_attempt`, `reason`, and `rejection_summary` (counts per hard-filter reason).
 - Dispatch through the command bus only; the agent never writes SQL directly. The handler lives in `app/commands/match_commands.py`.
@@ -69,4 +69,5 @@ If `preferred_date` is before today, multiply by 0.85. The score is computed by 
 - Empty pool produces `NO_MATCH`.
 - Tavily exception still yields a proposal with `web_lookup=skipped`.
 - Same `(request_id, match_attempt)` does not duplicate assignment rows.
+- A refresh with the same ordered volunteers writes nothing and sends no mail. A different order supersedes the open proposals, stays `MATCH_PROPOSED`, and sends one updated mail. An empty refresh keeps the current proposals.
 - Profile update changes the Chroma document (fake client assertion).

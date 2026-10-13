@@ -141,7 +141,7 @@ def test_admin_searches_every_request_and_a_requester_sees_only_their_own(app, c
     assert forbidden.status_code == 403
 
 
-def test_admin_detail_shows_score_rationale_and_contact(app, client):
+def test_admin_detail_shows_score_offer_and_contact(app, client):
     requester = register(client, REQUESTER)
     requester_id = requester.get_json()["user_id"]
     volunteer = register(client, VOLUNTEER)
@@ -170,13 +170,15 @@ def test_admin_detail_shows_score_rationale_and_contact(app, client):
     assert "באיחור" in body
     assert "Yossi Cohen" in body
     assert "ציון: 91" in body
-    assert "Nearby and can drive" in body
+    assert "הצעת המתנדב" in body
+    assert "Five years with Magen David Adom as a volunteer medic." in body
+    assert "Nearby and can drive" not in body
     assert "Extra Volunteer" in body
     assert "similarity" not in body.lower()
     assert f'value="{profile_id}"' in body
 
 
-def test_admin_detail_explains_a_match_in_plain_hebrew(app, client):
+def test_admin_detail_shows_the_volunteer_offer_not_the_match_rationale(app, client):
     requester = register(client, REQUESTER)
     requester_id = requester.get_json()["user_id"]
     register(client, VOLUNTEER)
@@ -198,9 +200,9 @@ def test_admin_detail_explains_a_match_in_plain_hebrew(app, client):
 
     body = client.get(f"/requests/{request_id}").data.decode()
 
-    assert "מה שהכי השפיע על הציון: התאמה לניסיון של המתנדב, וכישורים מתאימים." in body
-    assert "אפשר לעזור מרחוק, בלי להגיע." in body
-    assert "לא בדקנו עדכונים על העיר." in body
+    assert "הצעת המתנדב" in body
+    assert "Five years with Magen David Adom as a volunteer medic." in body
+    assert "מה שהכי השפיע על הציון" not in body
     assert "web_lookup" not in body
     assert "similarity" not in body.lower()
 

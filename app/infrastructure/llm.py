@@ -9,8 +9,15 @@ import urllib.request
 from typing import Protocol
 
 
+# A local model such as phi3 needs longer than a hosted API, and it will keep
+# generating unless the length is capped. 256 tokens is enough for the JSON
+# safety flag and for two short Hebrew sentences.
+LLM_TIMEOUT_SECONDS = 90.0
+OLLAMA_NUM_PREDICT = 256
+
+
 class LlmClient(Protocol):
-    def complete(self, prompt: str, *, timeout: float = 10.0) -> str: ...
+    def complete(self, prompt: str, *, timeout: float = LLM_TIMEOUT_SECONDS) -> str: ...
 
 
 class OpenAIChat:
@@ -18,7 +25,7 @@ class OpenAIChat:
         self._api_key = api_key
         self._model = model
 
-    def complete(self, prompt: str, *, timeout: float = 10.0) -> str:
+    def complete(self, prompt: str, *, timeout: float = LLM_TIMEOUT_SECONDS) -> str:
         from openai import OpenAI
 
         response = OpenAI(api_key=self._api_key, timeout=timeout).chat.completions.create(
@@ -34,8 +41,15 @@ class OllamaChat:
         self._model = model
         self._base_url = base_url.rstrip("/")
 
-    def complete(self, prompt: str, *, timeout: float = 10.0) -> str:
-        payload = json.dumps({"model": self._model, "prompt": prompt, "stream": False}).encode()
+    def complete(self, prompt: str, *, timeout: float = LLM_TIMEOUT_SECONDS) -> str:
+        payload = json.dumps(
+            {
+                "model": self._model,
+                "prompt": prompt,
+                "stream": False,
+                "options": {"num_predict": OLLAMA_NUM_PREDICT},
+            }
+        ).encode()
         request = urllib.request.Request(
             f"{self._base_url}/api/generate",
             data=payload,
@@ -62,7 +76,7 @@ def unsafe_travel(client: LlmClient, evidence: str) -> bool:
         "Use true only when the text reports a transit shutdown, storm, or municipal "
         "emergency that makes travel unsafe today.\n"
         + evidence[:4000],
-        timeout=10,
+        timeout=LLM_TIMEOUT_SECONDS,
     )
     data = json.loads(_json_object(raw))
     return bool(data.get("unsafe_travel"))

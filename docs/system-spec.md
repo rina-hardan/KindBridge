@@ -269,7 +269,7 @@ Lockout: 5 failures within 15 minutes for the same email.
 
 ### 4.1 Help request status
 
-`PENDING_REVIEW` -> `MATCH_PROPOSED` | `NO_MATCH`; `MATCH_PROPOSED` -> `ASSIGNED` -> `COMPLETED`; `NO_MATCH` -> `PENDING_REVIEW` (retrigger) or `ASSIGNED` (override).
+`PENDING_REVIEW` -> `MATCH_PROPOSED` | `NO_MATCH`; `MATCH_PROPOSED` stays `MATCH_PROPOSED` when a later check finds a different top K, then -> `ASSIGNED` -> `COMPLETED`; `NO_MATCH` -> `PENDING_REVIEW` (retrigger) or `ASSIGNED` (override).
 `ASSIGNED` -> `PENDING_REVIEW` when the volunteer releases.
 Any of `PENDING_REVIEW`, `MATCH_PROPOSED`, `NO_MATCH`, `ASSIGNED` -> `CANCELLED`.
 
@@ -280,6 +280,7 @@ flowchart LR
   pending --> noMatch[NO_MATCH]
   noMatch -->|retrigger| pending
   noMatch -->|override| assigned
+  proposed -->|updated match| proposed
   proposed -->|approve_or_override| assigned[ASSIGNED]
   proposed -->|reject| pending
   proposed -->|retrigger| pending
@@ -298,7 +299,8 @@ flowchart LR
 | - | `SubmitHelpRequestCommand` | `HelpRequestCreated` | `PENDING_REVIEW` | Non-admin with a requester profile; enqueue agent. `resource_type` is `UNKNOWN`, `required_skills` is `[]`, `estimated_duration_min` is null, and `frequency` is one of the four cadence values |
 | `PENDING_REVIEW` | `ClassifyConcurrencyCommand` | `ConcurrencyClassified` | (unchanged) | **[NEW]** Agent or admin. See 4.4 |
 | `PENDING_REVIEW` | `ProposeMatchCommand` | `MatchesProposed` | `MATCH_PROPOSED` | Agent only; writes 1..K `PROPOSED` rows; increments `match_attempt`; applies the hard filter in 4.2 |
-| `PENDING_REVIEW` | `ProposeMatchCommand` (empty pool) | `NoMatchFound` | `NO_MATCH` | Admin notified; no assignment rows; payload carries the **rejection summary** (counts per filter reason) |
+| `MATCH_PROPOSED` | `ProposeMatchCommand` | `MatchesProposed` (`updated: true`) | `MATCH_PROPOSED` | Agent re-checks until the request is assigned. Writes a new batch only when the ordered volunteer ids differ; previous `PROPOSED` -> `SUPERSEDED`; admins get one updated mail. The same ids, or an empty new pool, append nothing and send no mail |
+| `PENDING_REVIEW` | `ProposeMatchCommand` (empty pool) | `NoMatchFound` | `NO_MATCH` | Admin notified; no assignment rows; payload carries the **rejection summary** (counts per filter reason). A refresh of `MATCH_PROPOSED` does not take this path |
 | `NO_MATCH` or `MATCH_PROPOSED` | `RetriggerMatchCommand` | `MatchRetriggered` | `PENDING_REVIEW` | Admin; previous `PROPOSED` -> `SUPERSEDED` |
 | `MATCH_PROPOSED` | `ApproveAssignmentCommand` | `AssignmentApproved` | `ASSIGNED` | Admin; fails if `is_self_assignment` or the volunteer no longer passes the capacity/overlap checks; chosen assignment -> `ASSIGNED`; siblings -> `SUPERSEDED`; increment the matching volunteer counter; Gmail notify volunteer (and requester); expose address/phone to that volunteer only |
 | `MATCH_PROPOSED` | `RejectAssignmentCommand` | `AssignmentsRejected` | `PENDING_REVIEW` | Admin; **all** current `PROPOSED` -> `DECLINED` with reason; those volunteers blacklisted for **this request only**; re-queue agent |

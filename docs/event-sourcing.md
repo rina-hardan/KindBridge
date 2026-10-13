@@ -59,7 +59,7 @@ Never put a plaintext password in any payload. Password hashes must not appear i
 
 - `HelpRequestCreated`: `requester_id`, `city`, `address`, `category`, `resource_type` (`UNKNOWN` at submit), `description`, `urgency`, `frequency` (`ON_DEMAND`, `WEEKLY`, `BIWEEKLY`, or `MONTHLY`), `preferred_date` (null from the create form), `preferred_time_from`, `preferred_time_to` (an optional window for every frequency, or both null), `preferred_weekdays` (a list of `SUN` through `SAT`, empty when frequency is `ON_DEMAND`), `estimated_duration_min` (null; the form does not collect it), `required_skills` (`[]`; the form does not collect skills), `requires_vehicle`, `concurrency_type` (`UNKNOWN` at submit), `match_attempt` (`0`). `series_id` stays null. `address` is plaintext in the payload; queries hide it until the request is `ASSIGNED`. v1 does not emit `HelpRequestUpdated`; the owner cancels and submits a new request.
 - `ResourceTypeClassified`: appended by `ProposeMatchCommand` when `resource_type` is still `UNKNOWN`, before the hard filter. Payload: `resource_type` (`PHYSICAL_PRESENCE`, `EQUIPMENT_LOAN`, or `FLEXIBLE_REMOTE`), `reason`, `match_attempt`. The projector sets `help_requests.resource_type`. The aggregate does not change status.
-- `MatchesProposed`: array of `{ volunteer_id, score, rationale, rank }`, `match_attempt`, `k`.
+- `MatchesProposed`: array of `{ volunteer_id, score, rationale, rank }`, `match_attempt`, `k`. A refresh of a request that is already `MATCH_PROPOSED` adds `updated: true` and is appended only when the ordered volunteer ids differ from the open proposals. The projector then sets the previous `PROPOSED` rows to `SUPERSEDED` before inserting the new batch. The same volunteers, or an empty new pool, append nothing.
 - `NoMatchFound`: `match_attempt`, `reason`, `rejection_summary` (counts per hard-filter reason).
 - `MatchRetriggered`.
 - `AssignmentApproved`: `assignment_id`, `volunteer_id`, `approved_by`.
@@ -69,7 +69,7 @@ Never put a plaintext password in any payload. Password hashes must not appear i
 - `TaskReleased`: `assignment_id`, reason.
 - `HelpRequestCancelled`: `cancelled_by`, reason.
 
-Idempotent propose: if the stream already contains `MatchesProposed` or `NoMatchFound` for the same `match_attempt`, `ProposeMatchCommand` is a no-op.
+Idempotent propose: if the stream already contains `MatchesProposed` or `NoMatchFound` for the same `match_attempt`, `ProposeMatchCommand` is a no-op. A refresh that does not change the ordered volunteers does not consume `match_attempt`, so the next poll retries that attempt and sends no mail.
 
 ### ExemptionLink
 

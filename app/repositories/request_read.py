@@ -48,6 +48,7 @@ class AssignmentRow:
     city: str
     score: Decimal | None
     rationale: str | None
+    offer: str
     rank: int | None
     status: str
 
@@ -187,6 +188,7 @@ class RequestReadRepository:
                 users.c.id.label("user_id"),
                 users.c.full_name,
                 volunteer_profiles.c.primary_city,
+                volunteer_profiles.c.experience,
             )
             .select_from(
                 task_assignments.join(
@@ -206,6 +208,7 @@ class RequestReadRepository:
                 city=row.primary_city,
                 score=None if row.ai_score is None else Decimal(str(row.ai_score)),
                 rationale=row.ai_rationale,
+                offer=row.experience or "",
                 rank=None if row.rank_in_batch is None else int(row.rank_in_batch),
                 status=row.status,
             )

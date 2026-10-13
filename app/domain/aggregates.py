@@ -184,7 +184,12 @@ class HelpRequest(AggregateRoot):
         """
         if match_attempt in self.completed_attempts:
             return
-        if self.status != "PENDING_REVIEW":
+        match_event = next(
+            (name for name, _payload in payloads if name in ("MatchesProposed", "NoMatchFound")),
+            None,
+        )
+        refreshing = self.status == "MATCH_PROPOSED" and match_event == "MatchesProposed"
+        if self.status != "PENDING_REVIEW" and not refreshing:
             raise DomainError("Help request is not pending review")
         if match_attempt != self.match_attempt:
             raise ConcurrencyConflict(
