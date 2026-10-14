@@ -172,7 +172,7 @@ class Notifier(Protocol):
 
 **Recipients.** Only addresses that come from the `users` projection: the assigned volunteer (`volunteer_profiles.user_id`), the requester (`help_requests.requester_id`), and admins (`users.is_admin` and `is_active`). `ADMIN_NOTIFY_EMAIL` narrows the admin list to one address, and only if that address belongs to an active admin; otherwise every active admin is mailed.
 
-**Copy.** Message text is built by a pure module (`app/infrastructure/notifications.py`), Hebrew by default and English on request, using the `app/i18n.py` category and urgency labels. Mails never contain a phone number or an address; the volunteer sees them on the tasks page after logging in.
+**Copy.** Message text is built by a pure module (`app/infrastructure/notifications.py`), Hebrew by default and English on request, using the `app/i18n.py` category and urgency labels. Mails never contain a phone number or an address; the volunteer sees them on the tasks page only after completing the task.
 
 | Event | Process | Recipients |
 | :--- | :--- | :--- |

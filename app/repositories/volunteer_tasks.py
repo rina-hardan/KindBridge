@@ -28,6 +28,7 @@ class VolunteerTaskRow:
     preferred_date: date | None
     description: str
     requester_name: str
+    offer: str
     address: str
     phone_encrypted: str
 
@@ -69,6 +70,7 @@ class VolunteerTaskRepository:
                     help_requests.c.preferred_date,
                     help_requests.c.description,
                     help_requests.c.address,
+                    volunteer_profiles.c.experience,
                     users.c.full_name,
                     users.c.phone,
                     users.c.home_address,
@@ -93,6 +95,7 @@ class VolunteerTaskRepository:
                     preferred_date=as_date(row.preferred_date),
                     description=row.description,
                     requester_name=row.full_name,
+                    offer=row.experience,
                     address=physical_address(row.address, row.home_address),
                     phone_encrypted=row.phone,
                 )

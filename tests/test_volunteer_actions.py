@@ -181,7 +181,9 @@ def test_assigned_volunteer_completes_task_from_the_tasks_page(app, client, engi
     assert page.status_code == 200
     assert "סיום משימה" in body
     assert "שחרור" in body
-    assert "12 Harbor Road" in body
+    assert "12 Harbor Road" not in body
+    assert REQUESTER["phone"] not in body
+    assert "••••" in body
     assert f'data-complete="{assigned["assignment_id"]}"' in body
 
     response = csrf_post(client, f"/api/assignments/{assigned['assignment_id']}/complete", {})
@@ -194,9 +196,9 @@ def test_assigned_volunteer_completes_task_from_the_tasks_page(app, client, engi
             select(task_assignments.c.status).where(task_assignments.c.id == assigned["assignment_id"])
         ).scalar_one()
     assert status == "COMPLETED"
-    hidden = client.get("/me/tasks").data.decode()
-    assert "12 Harbor Road" not in hidden
-    assert "••••" in hidden
+    finished = client.get("/me/tasks").data.decode()
+    assert "12 Harbor Road" in finished
+    assert REQUESTER["phone"] in finished
 
 
 def test_release_declines_the_volunteer_and_notifies(app, client, engine, clock):

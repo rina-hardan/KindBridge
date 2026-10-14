@@ -269,6 +269,7 @@ def my_tasks():
                 "preferred_date": item.preferred_date,
                 "description": item.description,
                 "requester_name": item.requester_name,
+                "offer": item.offer,
                 "overdue": item.overdue,
                 "address": item.address,
                 "phone": item.phone,

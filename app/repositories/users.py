@@ -1,12 +1,13 @@
 import json
 import uuid
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 
 from sqlalchemy import Connection, case, exists, false, func, select, true
 
 from app.repositories.requests import as_date
 from app.repositories.tables import (
+    event_store,
     help_requests,
     requester_profiles,
     task_assignments,
@@ -167,25 +168,50 @@ class UserRepository:
         )
         return tuple(_volunteer_profile_record(row) for row in rows)
 
-    def volunteer_profile_ids_with_status(
-        self, conn: Connection, user_id: uuid.UUID, statuses: tuple[str, ...]
-    ) -> frozenset[uuid.UUID]:
-        if not statuses:
-            return frozenset()
+    def volunteer_profile_ids_hidden_from_wanted(self, conn: Connection, user_id: uuid.UUID) -> frozenset[uuid.UUID]:
+        """Profiles omitted from the want-to-do column.
+
+        An assigned profile is omitted. A completed profile stays omitted until a
+        later release of that same profile. A declined proposal does not count as a release.
+        """
         rows = conn.execute(
-            select(task_assignments.c.volunteer_id)
+            select(
+                task_assignments.c.id,
+                task_assignments.c.volunteer_id,
+                task_assignments.c.status,
+                task_assignments.c.updated_at,
+                task_assignments.c.request_id,
+            )
             .select_from(
                 task_assignments.join(
                     volunteer_profiles, volunteer_profiles.c.id == task_assignments.c.volunteer_id
                 )
             )
-            .where(
-                volunteer_profiles.c.user_id == user_id,
-                task_assignments.c.status.in_(statuses),
-            )
-            .distinct()
-        )
-        return frozenset(row.volunteer_id for row in rows)
+            .where(volunteer_profiles.c.user_id == user_id)
+        ).all()
+        if not rows:
+            return frozenset()
+        assigned: set[uuid.UUID] = set()
+        latest_completed: dict[uuid.UUID, datetime] = {}
+        profile_by_assignment: dict[uuid.UUID, uuid.UUID] = {}
+        request_ids: set[uuid.UUID] = set()
+        for row in rows:
+            profile_by_assignment[row.id] = row.volunteer_id
+            request_ids.add(row.request_id)
+            if row.status == "ASSIGNED":
+                assigned.add(row.volunteer_id)
+            elif row.status == "COMPLETED":
+                stamp = _naive(row.updated_at)
+                previous = latest_completed.get(row.volunteer_id)
+                if stamp is not None and (previous is None or stamp > previous):
+                    latest_completed[row.volunteer_id] = stamp
+        latest_release = _latest_release(conn, request_ids, profile_by_assignment)
+        hidden = set(assigned)
+        for profile_id, completed_at in latest_completed.items():
+            released_at = latest_release.get(profile_id)
+            if released_at is None or released_at <= completed_at:
+                hidden.add(profile_id)
+        return frozenset(hidden)
 
     def volunteer_profile(self, conn: Connection, user_id: uuid.UUID) -> VolunteerProfileRecord | None:
         profiles = self.list_volunteer_profiles(conn, user_id)
@@ -324,6 +350,40 @@ def _weekday_codes(value) -> tuple[str, ...]:
     if not isinstance(raw, list):
         return ()
     return tuple(str(item) for item in raw)
+
+
+def _naive(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is not None:
+        return value.replace(tzinfo=None)
+    return value
+
+
+def _latest_release(
+    conn: Connection, request_ids: set[uuid.UUID], profile_by_assignment: dict[uuid.UUID, uuid.UUID]
+) -> dict[uuid.UUID, datetime]:
+    if not request_ids:
+        return {}
+    events = conn.execute(
+        select(event_store.c.payload_json, event_store.c.created_at)
+        .where(event_store.c.aggregate_id.in_(request_ids))
+        .where(event_store.c.event_type == "TaskReleased")
+    ).all()
+    latest: dict[uuid.UUID, datetime] = {}
+    for event in events:
+        payload = json.loads(event.payload_json or "{}")
+        raw_id = payload.get("assignment_id")
+        if not raw_id:
+            continue
+        profile_id = profile_by_assignment.get(uuid.UUID(str(raw_id)))
+        stamp = _naive(event.created_at)
+        if profile_id is None or stamp is None:
+            continue
+        previous = latest.get(profile_id)
+        if previous is None or stamp > previous:
+            latest[profile_id] = stamp
+    return latest
 
 
 def _unavailability(row) -> UnavailabilityRecord:

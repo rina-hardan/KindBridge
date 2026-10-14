@@ -41,14 +41,15 @@
           <caption class="visually-hidden">{{ t("tasks.title") }}</caption>
           <thead>
             <tr>
+              <th scope="col">{{ t("tasks.offer") }}</th>
               <th scope="col">{{ t("dashboard.status") }}</th>
+              <th scope="col">{{ t("field.phone") }}</th>
+              <th scope="col">{{ t("request.address") }}</th>
+              <th scope="col">{{ t("dashboard.requester") }}</th>
+              <th scope="col">{{ t("field.city") }}</th>
               <th scope="col">{{ t("dashboard.category") }}</th>
               <th scope="col">{{ t("dashboard.urgency") }}</th>
               <th scope="col">{{ t("requests.date") }}</th>
-              <th scope="col">{{ t("dashboard.requester") }}</th>
-              <th scope="col">{{ t("field.city") }}</th>
-              <th scope="col">{{ t("request.address") }}</th>
-              <th scope="col">{{ t("field.phone") }}</th>
               <th scope="col">{{ t("requests.description") }}</th>
               <th scope="col">{{ t("tasks.actions") }}</th>
             </tr>
@@ -56,24 +57,25 @@
           <tbody>
             {% for item in tasks.items %}
             <tr>
+              <td class="kb-clip" dir="auto" title="{{ item.offer }}">{{ item.offer }}</td>
               <td>
                 <span class="badge kb-status kb-status-{{ item.status|lower }}">{{ t("status." + item.status) }}</span>
                 {% if item.overdue %}
                 <span class="badge kb-status kb-status-overdue">{{ t("status.OVERDUE") }}</span>
                 {% endif %}
               </td>
-              <td>{{ t("category." + item.category) }}</td>
-              <td>{{ t("urgency." + item.urgency) }}</td>
-              <td>{{ item.preferred_date or "—" }}</td>
-              <td dir="auto">{{ item.requester_name }}</td>
-              <td dir="auto">{{ item.city }}</td>
-              {% if item.address is not none %}
-              <td dir="auto">{{ item.address }}</td>
-              <td dir="ltr">{{ item.phone }}</td>
+              {% if item.phone is not none %}
+              <td dir="ltr" class="text-nowrap fw-semibold">{{ item.phone }}</td>
+              <td dir="auto" class="fw-semibold">{{ item.address }}</td>
               {% else %}
               <td><span aria-label="{{ t('tasks.hidden') }}" title="{{ t('tasks.hidden') }}">••••</span></td>
               <td><span aria-label="{{ t('tasks.hidden') }}" title="{{ t('tasks.hidden') }}">••••</span></td>
               {% endif %}
+              <td dir="auto">{{ item.requester_name }}</td>
+              <td dir="auto">{{ item.city }}</td>
+              <td>{{ t("category." + item.category) }}</td>
+              <td>{{ t("urgency." + item.urgency) }}</td>
+              <td>{{ item.preferred_date or "—" }}</td>
               <td class="kb-clip" dir="auto" title="{{ item.description }}">{{ item.description }}</td>
               <td>
                 {% if item.status == "ASSIGNED" %}

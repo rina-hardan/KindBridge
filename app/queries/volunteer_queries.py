@@ -59,8 +59,9 @@ class VolunteerTaskItem:
     preferred_date: str | None
     description: str
     requester_name: str
+    offer: str
     overdue: bool
-    # Address and phone belong to an ASSIGNED task only. For anything else they are None, never masked text.
+    # The volunteer sees the requester's address and phone only after the task is COMPLETED. ASSIGNED stays None.
     address: str | None
     phone: str | None
 
@@ -113,6 +114,7 @@ class GetVolunteerTasksQuery:
 
     def _item(self, row, today: date) -> VolunteerTaskItem:
         active = row.status == "ASSIGNED"
+        show_contact = row.status == "COMPLETED"
         return VolunteerTaskItem(
             assignment_id=str(row.assignment_id),
             request_id=str(row.request_id),
@@ -123,7 +125,8 @@ class GetVolunteerTasksQuery:
             preferred_date=None if row.preferred_date is None else row.preferred_date.isoformat(),
             description=row.description,
             requester_name=row.requester_name,
+            offer=row.offer,
             overdue=active and row.preferred_date is not None and row.preferred_date < today,
-            address=row.address if active else None,
-            phone=self._encryptor.decrypt(row.phone_encrypted) if active else None,
+            address=row.address if show_contact else None,
+            phone=self._encryptor.decrypt(row.phone_encrypted) if show_contact else None,
         )

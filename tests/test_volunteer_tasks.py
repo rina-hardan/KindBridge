@@ -1,7 +1,11 @@
 """A volunteer sees only their own ASSIGNED and COMPLETED tasks, on /me/tasks and /api/me/tasks."""
 
 import json
+from datetime import datetime
 from uuid import UUID, uuid4
+
+from app.domain.events import DomainEvent
+from app.projections.match_projector import MatchProjector
 
 from sqlalchemy import select
 
@@ -78,7 +82,7 @@ def test_new_volunteer_sees_an_empty_list(client):
     assert _tasks(client)["items"] == []
 
 
-def test_assigned_task_shows_status_with_address_and_phone(app, client):
+def test_assigned_task_hides_address_and_phone(app, client):
     requester_id = _requester(client)
     profile_id = _volunteer(client)
     request_id, assignment_id = _assign(app, requester_id, profile_id, description="Ride to the clinic")
@@ -91,16 +95,21 @@ def test_assigned_task_shows_status_with_address_and_phone(app, client):
     assert task["assignment_id"] == str(assignment_id)
     assert task["request_id"] == str(request_id)
     assert task["status"] == "ASSIGNED"
-    assert task["address"] == "12 Harbor Road"
-    assert task["phone"] == REQUESTER["phone"]
+    assert task["address"] is None
+    assert task["phone"] is None
     assert task["requester_name"] == REQUESTER["full_name"]
+    assert task["offer"] == VOLUNTEER_PROFILE["experience"]
     assert task["overdue"] is False
     assert "שובץ".encode() in page.data
-    assert b"12 Harbor Road" in page.data
+    assert "ההתנדבות שלך".encode() in page.data
+    assert VOLUNTEER_PROFILE["experience"].encode() in page.data
+    assert b"12 Harbor Road" not in page.data
+    assert REQUESTER["phone"].encode() not in page.data
+    assert "••••".encode() in page.data
     assert b"Ride to the clinic" in page.data
 
 
-def test_completed_task_hides_address_and_phone(app, engine, client):
+def test_completed_task_shows_address_and_phone(app, engine, client):
     requester_id = _requester(client)
     profile_id = _volunteer(client)
     request_id, assignment_id = _assign(app, requester_id, profile_id)
@@ -108,14 +117,17 @@ def test_completed_task_hides_address_and_phone(app, engine, client):
 
     body = _tasks(client)
     page = client.get("/me/tasks")
+    filtered = client.get("/me/tasks", query_string={"status": "COMPLETED"})
 
     task = body["items"][0]
     assert task["status"] == "COMPLETED"
-    assert task["address"] is None
-    assert task["phone"] is None
+    assert task["address"] == "12 Harbor Road"
+    assert task["phone"] == REQUESTER["phone"]
     assert "הושלם".encode() in page.data
-    assert b"12 Harbor Road" not in page.data
-    assert REQUESTER["phone"].encode() not in page.data
+    assert b"12 Harbor Road" in page.data
+    assert REQUESTER["phone"].encode() in page.data
+    assert b"12 Harbor Road" in filtered.data
+    assert REQUESTER["phone"].encode() in filtered.data
     with engine.connect() as conn:
         status = conn.execute(select(help_requests.c.status).where(help_requests.c.id == request_id)).scalar_one()
         active = conn.execute(
@@ -312,13 +324,20 @@ def _wanted(client, path: str = "/me/tasks") -> str:
     return page.data.decode()
 
 
+def _taken_and_wanted(client) -> tuple[str, str]:
+    """The taken-on table, then the want-to-do column. An assigned offer is named in the table."""
+    text = _wanted(client)
+    taken, _, side = text.partition("<aside")
+    return taken, side
+
+
 def _open_request(app, requester_id) -> UUID:
     request_id = uuid4()
     _append(app, request_id, 0, "HelpRequestCreated", _created_payload(requester_id, preferred_date=FUTURE), 1)
     return request_id
 
 
-def test_a_proposed_volunteering_leaves_the_want_to_do_column(app, client):
+def test_a_proposed_volunteering_stays_in_the_want_to_do_column(app, client):
     requester_id = _requester(client)
     profile_id = _offer(client, COMMITTED)
     extra = csrf_post(client, "/api/me/volunteer", {**VOLUNTEER_PROFILE, "experience": STAYS, "base_frequency": "MONTHLY"})
@@ -329,21 +348,10 @@ def test_a_proposed_volunteering_leaves_the_want_to_do_column(app, client):
     tasks = _wanted(client)
     form = _wanted(client, "/me/volunteer")
 
-    assert COMMITTED not in tasks
+    assert COMMITTED in tasks
     assert STAYS in tasks
-    assert COMMITTED not in form
+    assert COMMITTED in form
     assert STAYS in form
-
-    _append(
-        app,
-        request_id,
-        2,
-        "AssignmentsRejected",
-        {"volunteer_ids": [str(profile_id)], "reason": "not this time"},
-        3,
-    )
-
-    assert COMMITTED in _wanted(client)
 
 
 def test_release_returns_the_volunteering_to_the_want_to_do_column(app, client):
@@ -351,10 +359,11 @@ def test_release_returns_the_volunteering_to_the_want_to_do_column(app, client):
     profile_id = _offer(client, COMMITTED)
     request_id, assignment_id = _assign(app, requester_id, profile_id, description="Ride to the clinic")
 
-    hidden = _wanted(client)
+    taken, side = _taken_and_wanted(client)
 
-    assert COMMITTED not in hidden
-    assert "Ride to the clinic" in hidden
+    assert COMMITTED not in side
+    assert COMMITTED in taken
+    assert "Ride to the clinic" in taken
 
     _append(
         app,
@@ -376,13 +385,70 @@ def test_completing_a_task_keeps_the_volunteering_out_of_the_want_to_do_column(a
     request_id, assignment_id = _assign(app, requester_id, profile_id, description="Ride to the clinic")
     _append(app, request_id, 3, "TaskCompleted", {"assignment_id": str(assignment_id)}, 4)
 
-    text = _wanted(client)
+    taken, side = _taken_and_wanted(client)
 
-    assert COMMITTED not in text
-    assert "Ride to the clinic" in text
+    assert COMMITTED not in side
+    assert COMMITTED in taken
+    assert "Ride to the clinic" in taken
 
 
-def test_assigning_someone_else_returns_the_volunteering_to_the_want_to_do_column(app, client):
+def test_a_later_release_returns_a_volunteering_that_was_completed_before(app, client):
+    requester_id = _requester(client)
+    profile_id = _offer(client, COMMITTED)
+    finished_request, finished_assignment = _assign(app, requester_id, profile_id, description="Finished ride")
+    _append(app, finished_request, 3, "TaskCompleted", {"assignment_id": str(finished_assignment)}, 4)
+    request_id, assignment_id = _assign(app, requester_id, profile_id, description="Ride to the clinic")
+
+    taken, side = _taken_and_wanted(client)
+    assert COMMITTED not in side
+    assert COMMITTED in taken
+
+    app.extensions["kindbridge"].event_store.append(
+        request_id,
+        3,
+        [
+            DomainEvent(
+                aggregate_id=request_id,
+                aggregate_type="HelpRequest",
+                event_type="TaskReleased",
+                payload={"assignment_id": str(assignment_id), "reason": "cannot attend"},
+                version=4,
+                created_at=datetime(2026, 10, 3, 9, 0),
+            )
+        ],
+        projector=MatchProjector(),
+    )
+
+    shown = _wanted(client)
+    assert COMMITTED in shown
+    assert "Ride to the clinic" not in shown
+    assert "Finished ride" in shown
+
+
+def test_a_declined_proposal_does_not_return_a_completed_volunteering(app, client):
+    requester_id = _requester(client)
+    profile_id = _offer(client, COMMITTED)
+    finished_request, finished_assignment = _assign(app, requester_id, profile_id, description="Finished ride")
+    _append(app, finished_request, 3, "TaskCompleted", {"assignment_id": str(finished_assignment)}, 4)
+    request_id = _open_request(app, requester_id)
+    proposed_id = uuid4()
+    _propose(app, request_id, profile_id, proposed_id)
+    _append(
+        app,
+        request_id,
+        2,
+        "AssignmentsRejected",
+        {"volunteer_ids": [str(profile_id)], "reason": "not this time"},
+        3,
+    )
+
+    taken, side = _taken_and_wanted(client)
+    assert COMMITTED not in side
+    assert COMMITTED in taken
+    assert "Finished ride" in taken
+
+
+def test_assigning_someone_else_leaves_a_proposed_volunteering_in_the_want_to_do_column(app, client):
     requester_id = _requester(client)
     other_id = _offer(client, "מתנדב אחר", OTHER_VOLUNTEER)
     profile_id = _offer(client, COMMITTED)
@@ -416,7 +482,7 @@ def test_assigning_someone_else_returns_the_volunteering_to_the_want_to_do_colum
         2,
     )
 
-    assert COMMITTED not in _wanted(client)
+    assert COMMITTED in _wanted(client)
 
     _append(
         app,
@@ -435,7 +501,9 @@ def test_cancelling_an_assigned_request_returns_the_volunteering(app, client):
     profile_id = _offer(client, COMMITTED)
     request_id, _assignment_id = _assign(app, requester_id, profile_id, description="Ride to the clinic")
 
-    assert COMMITTED not in _wanted(client)
+    taken, side = _taken_and_wanted(client)
+    assert COMMITTED not in side
+    assert COMMITTED in taken
 
     _append(app, request_id, 3, "HelpRequestCancelled", {"reason": "no longer needed"}, 4)
 
@@ -444,13 +512,13 @@ def test_cancelling_an_assigned_request_returns_the_volunteering(app, client):
     assert "Ride to the clinic" not in shown
 
 
-def test_cancelling_a_proposed_request_returns_the_volunteering(app, client):
+def test_cancelling_a_proposed_request_keeps_the_volunteering_listed(app, client):
     requester_id = _requester(client)
     profile_id = _offer(client, COMMITTED)
     request_id = _open_request(app, requester_id)
     _propose(app, request_id, profile_id, uuid4())
 
-    assert COMMITTED not in _wanted(client)
+    assert COMMITTED in _wanted(client)
 
     _append(app, request_id, 2, "HelpRequestCancelled", {"reason": "no longer needed"}, 3)
 

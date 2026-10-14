@@ -2,7 +2,7 @@
 
 Hebrew is the default (same rule as ``app/i18n.py``); ``lang="en"`` gives the English text.
 Mails stay short. They never carry a phone number or an address: a volunteer sees those on
-the tasks page after logging in, as the spec requires.
+the tasks page only after completing the task.
 """
 
 from collections.abc import Mapping, Sequence
@@ -48,7 +48,7 @@ _TEXT = {
         "none": "ללא",
         "assigned_volunteer_subject": "שובצת לבקשת עזרה: {category} ב-{city}",
         "assigned_volunteer_intro": "שובצת לבקשת עזרה ב-KindBridge.",
-        "assigned_volunteer_details": "הכתובת ופרטי הקשר זמינים לך במסך המשימות לאחר התחברות:",
+        "assigned_volunteer_details": "הטלפון והכתובת של מבקש העזרה יופיעו במסך המשימות אחרי שתסיים את המשימה:",
         "assigned_requester_subject": "מתנדב/ת שובץ/ה לבקשת העזרה שלך",
         "assigned_requester_intro": "מתנדב/ת שובץ/ה לבקשת העזרה שלך.",
         "track": "מעקב אחר הבקשה:",
@@ -92,7 +92,7 @@ _TEXT = {
         "none": "none",
         "assigned_volunteer_subject": "You were assigned to a help request: {category} in {city}",
         "assigned_volunteer_intro": "You were assigned to a help request on KindBridge.",
-        "assigned_volunteer_details": "The address and contact details are on your tasks page after you log in:",
+        "assigned_volunteer_details": "The requester's phone and address appear on your tasks page after you complete the task:",
         "assigned_requester_subject": "A volunteer was assigned to your help request",
         "assigned_requester_intro": "A volunteer was assigned to your help request.",
         "track": "Follow the request:",

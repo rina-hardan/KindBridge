@@ -74,11 +74,6 @@ class VolunteerProfileView:
     periods: tuple[UnavailabilityView, ...]
 
 
-# A want-to-do row stays off the volunteer screen while a placement is proposed,
-# assigned to this profile, or already completed.
-_HIDDEN_FROM_WANTED = ("PROPOSED", "ASSIGNED", "COMPLETED")
-
-
 class GetMyProfilesQuery:
     """The signed-in person's volunteerings and the open unavailability periods on each."""
 
@@ -99,7 +94,7 @@ class GetMyProfilesQuery:
         with self._engine.connect() as conn:
             profiles = self._users.list_volunteer_profiles(conn, user_id)
             if wanted_only:
-                hidden = self._users.volunteer_profile_ids_with_status(conn, user_id, _HIDDEN_FROM_WANTED)
+                hidden = self._users.volunteer_profile_ids_hidden_from_wanted(conn, user_id)
                 profiles = tuple(profile for profile in profiles if profile.profile_id not in hidden)
             periods = {
                 profile.profile_id: self._users.unavailability_periods(conn, profile.profile_id) for profile in profiles
