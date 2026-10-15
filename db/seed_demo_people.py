@@ -2,10 +2,11 @@
 
 Does not touch the admin or any account that already exists. Re-running skips an
 email that is already registered, writes that résumé into Chroma again, and checks
-the person's open request the same way the agent poll does. ``PENDING_REVIEW`` and
-``MATCH_PROPOSED`` are both searched. A request that already has proposals stays
-``MATCH_PROPOSED``: the same ordered volunteers leave the cards in place, and a
-different order replaces them. ``NO_MATCH`` is left alone until an admin retriggers.
+the person's open request the same way the agent poll does. ``PENDING_REVIEW``,
+``MATCH_PROPOSED``, and ``NO_MATCH`` are searched. A request that already has
+proposals stays ``MATCH_PROPOSED``: the same ordered volunteers leave the cards
+in place, and a different order replaces them. ``NO_MATCH`` is checked again
+the same way; volunteers appear only when the ordered ids change.
 
     python -m db.seed_demo_people
 
@@ -46,6 +47,7 @@ CHILDCARE = "שמירה על ילדים אחרי הצהריים, משחקים ו
 HOME_HELP = "עזרה בבית, ניקיון, סידור הבית ועזרה קלה לקשישים"
 DRIVING = "הסעות ברכב לבית חולים, לקופת חולים ולסידורים, יש לי רכב"
 COMPANY = "ליווי וביקור בית, שיחה, הליכה קצרה וחברה לקשישים"
+READING = "הקראת ספרים בקול רם לאנשים עם לקות ראייה, בבית"
 
 PEOPLE = (
     {
@@ -363,6 +365,81 @@ PEOPLE = (
         "frequency": "WEEKLY",
         "requires_vehicle": False,
     },
+    {
+        "email": "yaara.kore@kindbridge.demo",
+        "full_name": "יערה קורא",
+        "phone": "050-1004001",
+        "city": "רמת גן",
+        "home_address": "רחוב ביאליק 4, רמת גן",
+        "experience": "אני מבשלת ארוחות בבית. אני לא מקריאה ספרים, אינני יכולה להקריא, ואיני עוזרת לאנשים עם לקות ראייה.",
+        "has_vehicle": False,
+        "base_frequency": "WEEKLY",
+        "category": "companionship",
+        "description": f"צריך מישהו ל{READING}. צריך להגיע אלי הביתה ברמת גן ולהקריא.",
+        "urgency": "HIGH",
+        "frequency": "WEEKLY",
+        "requires_vehicle": False,
+    },
+    {
+        "email": "aviv.kore@kindbridge.demo",
+        "full_name": "אביב קורא",
+        "phone": "050-1004002",
+        "city": "רמת גן",
+        "home_address": "רחוב הרצל 9, רמת גן",
+        "experience": f"אני מקריא ספרים. {READING}. מגיע הביתה ברמת גן.",
+        "has_vehicle": False,
+        "base_frequency": "WEEKLY",
+        "category": "companionship",
+        "description": f"מחפש {COMPANY} ברמת גן. צריך להגיע אלי הביתה לשיחה.",
+        "urgency": "LOW",
+        "frequency": "WEEKLY",
+        "requires_vehicle": False,
+    },
+    {
+        "email": "hila.kore@kindbridge.demo",
+        "full_name": "הילה קוראת",
+        "phone": "050-1004003",
+        "city": "רמת גן",
+        "home_address": "רחוב ז'בוטינסקי 12, רמת גן",
+        "experience": f"מתנדבת להקראה. {READING}. מגיעה הביתה ברמת גן.",
+        "has_vehicle": False,
+        "base_frequency": "WEEKLY",
+        "category": "companionship",
+        "description": f"מחפשת {COMPANY} ברמת גן. צריך להגיע אלי הביתה לביקור.",
+        "urgency": "LOW",
+        "frequency": "WEEKLY",
+        "requires_vehicle": False,
+    },
+    {
+        "email": "tomer.kore@kindbridge.demo",
+        "full_name": "תומר קורא",
+        "phone": "050-1004004",
+        "city": "רמת גן",
+        "home_address": "שדרות ירושלים 3, רמת גן",
+        "experience": f"יש לי ניסיון ב{READING}. אני מגיע הביתה וקורא בקול.",
+        "has_vehicle": False,
+        "base_frequency": "WEEKLY",
+        "category": "companionship",
+        "description": f"מחפש {COMPANY} ברמת גן. צריך להגיע הביתה לשבת יחד.",
+        "urgency": "LOW",
+        "frequency": "WEEKLY",
+        "requires_vehicle": False,
+    },
+    {
+        "email": "sigal.kore@kindbridge.demo",
+        "full_name": "סיגל קורא",
+        "phone": "050-1004005",
+        "city": "רמת גן",
+        "home_address": "רחוב ביאליק 20, רמת גן",
+        "experience": f"{READING}. אני לא מקריאה ספרים, אינני יכולה להקריא, ואיני מוכנה לבוא להקראה בבית.",
+        "has_vehicle": False,
+        "base_frequency": "WEEKLY",
+        "category": "companionship",
+        "description": f"מחפשת {COMPANY} ברמת גן. צריך להגיע אלי הביתה לשיחה קצרה.",
+        "urgency": "LOW",
+        "frequency": "WEEKLY",
+        "requires_vehicle": False,
+    },
 )
 
 
@@ -475,7 +552,7 @@ def _propose(services, request_id) -> str:
         return "missing"
     status = row.status
     attempt = int(row.match_attempt)
-    if status not in ("PENDING_REVIEW", "MATCH_PROPOSED"):
+    if status not in ("PENDING_REVIEW", "MATCH_PROPOSED", "NO_MATCH"):
         return f"left as {status}"
     result = services.bus.dispatch(ProposeMatchCommand(request_id=request_id, match_attempt=attempt))
     with services.engine.connect() as conn:

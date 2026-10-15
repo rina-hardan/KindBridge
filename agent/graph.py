@@ -1,7 +1,7 @@
 """Deep Agent supervisor for one ProposeMatchCommand.
 
 ``search_filter`` runs load, retrieve, and hard filter. ``match_analysis``
-runs capacity, travel, web, and score and write. The numeric score stays in
+runs offer fit, capacity, travel, web, and score and write. The numeric score stays in
 the score stage. The supervisor never approves or assigns.
 
 When no chat model is configured, or delegation fails or skips a sub-agent,
@@ -20,15 +20,22 @@ from deepagents import (
     create_deep_agent,
     register_harness_profile,
 )
+from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from typing_extensions import Annotated
 
 from app.commands.match_commands import PIPELINE, MatchCommandHandlers, MatchWork
-from app.infrastructure.llm import LLM_TIMEOUT_SECONDS, OLLAMA_NUM_PREDICT, OllamaChat, OpenAIChat
+from app.infrastructure.llm import LLM_TIMEOUT_SECONDS, OllamaChat, OpenAIChat
 
 logger = logging.getLogger(__name__)
+
+# The supervisor answers with tool calls (the deepagents ``task`` tool plus a
+# sub-agent prompt). The 256-token cap used for the short JSON stages in
+# ``app.infrastructure.llm`` truncates those tool calls mid-JSON, so the
+# delegation model gets its own higher limit.
+SUPERVISOR_NUM_PREDICT = 2048
 
 SEARCH_FILTER = PIPELINE[:3]
 MATCH_ANALYSIS = PIPELINE[3:]
@@ -36,9 +43,16 @@ _SUBAGENTS = ("search_filter", "match_analysis")
 _FILESYSTEM_TOOLS = frozenset(
     {"ls", "read_file", "write_file", "edit_file", "delete", "glob", "grep", "execute"}
 )
+# The sub-agents are reached through the deepagents ``task`` tool, not as tools
+# of their own. A prompt that names them directly makes a small local model emit
+# tool calls named ``search_filter`` / ``match_analysis``; Ollama drops calls to
+# names it was not given, so the reply arrives empty and nothing is delegated.
 _DELEGATION = (
-    "Delegate this one match and then stop. "
-    "Call search_filter once, then match_analysis once. "
+    'Delegate this one match and then stop. Call the task tool twice: first with '
+    'subagent_type "search_filter", then with subagent_type "match_analysis". '
+    "Pass a one-sentence description with each call. "
+    "Make exactly one tool call per reply and wait for its result before the next one: "
+    "match_analysis needs the request that search_filter loads. "
     "Do not score, approve, assign, or use files."
 )
 _registered_profiles: set[str] = set()
@@ -58,6 +72,26 @@ class MatchGraphState(TypedDict):
 
 class MatchAgentState(DeepAgentState):
     work: NotRequired[MatchWork]
+
+
+class _OneDelegationPerReply(AgentMiddleware):
+    """Keep the first tool call of a reply and drop the rest.
+
+    The model answers the delegation prompt with both ``task`` calls in one
+    message, and LangGraph runs the tool calls of a single message in parallel
+    threads. Both sub-agents share one ``MatchWork``, so match_analysis would
+    reach ``score_and_write`` before search_filter loaded the request. Trimming
+    the reply sends the agent back to the model, which then delegates the
+    second sub-agent in its own turn.
+    """
+
+    def after_model(self, state, runtime) -> dict | None:
+        messages = state.get("messages") or []
+        last = messages[-1] if messages else None
+        calls = getattr(last, "tool_calls", None) or []
+        if len(calls) < 2:
+            return None
+        return {"messages": [last.model_copy(update={"tool_calls": calls[:1]})]}
 
 
 class _MatchGraphs:
@@ -132,7 +166,7 @@ def _supervisor(search, analysis, model):
         ),
         CompiledSubAgent(
             name="match_analysis",
-            description="Check capacity and travel, read web context, then score and write the proposal.",
+            description="Judge whether the offer fits the request, check capacity and travel, read web context, then score and write the proposal.",
             runnable=analysis,
         ),
     ]
@@ -140,6 +174,7 @@ def _supervisor(search, analysis, model):
         model=model,
         system_prompt=_DELEGATION,
         subagents=subagents,
+        middleware=[_OneDelegationPerReply()],
         permissions=_NO_FILES,
         state_schema=MatchAgentState,
         name="match_supervisor",
@@ -165,9 +200,20 @@ def _install_profile(model) -> None:
 
 def _delegate(agent, work: MatchWork) -> None:
     try:
-        agent.invoke(
+        result = agent.invoke(
             {"work": work, "messages": [HumanMessage(content=_DELEGATION)]},
             config={"recursion_limit": 12},
+        )
+        called = {
+            call["args"].get("subagent_type")
+            for message in result.get("messages", [])
+            for call in getattr(message, "tool_calls", None) or []
+            if isinstance(call, dict) and isinstance(call.get("args"), dict)
+        }
+        logger.info(
+            "match_supervisor_delegated search_filter=%s match_analysis=%s",
+            "search_filter" in called,
+            "match_analysis" in called,
         )
     except Exception:
         logger.exception("match_supervisor_failed")
@@ -207,7 +253,7 @@ def _model_from_pipeline(pipeline: MatchCommandHandlers):
             model=client._model,
             base_url=client._base_url,
             temperature=0,
-            num_predict=OLLAMA_NUM_PREDICT,
+            num_predict=SUPERVISOR_NUM_PREDICT,
             client_kwargs={"timeout": LLM_TIMEOUT_SECONDS},
         )
     return None

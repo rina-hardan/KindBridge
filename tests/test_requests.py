@@ -172,13 +172,13 @@ def test_admin_detail_shows_score_offer_and_contact(app, client):
     assert "ציון: 91" in body
     assert "הצעת המתנדב" in body
     assert "Five years with Magen David Adom as a volunteer medic." in body
-    assert "Nearby and can drive" not in body
+    assert "Nearby and can drive" in body
     assert "Extra Volunteer" in body
     assert "similarity" not in body.lower()
     assert f'value="{profile_id}"' in body
 
 
-def test_admin_detail_shows_the_volunteer_offer_not_the_match_rationale(app, client):
+def test_admin_detail_shows_the_match_rationale_in_plain_language(app, client):
     requester = register(client, REQUESTER)
     requester_id = requester.get_json()["user_id"]
     register(client, VOLUNTEER)
@@ -202,7 +202,10 @@ def test_admin_detail_shows_the_volunteer_offer_not_the_match_rationale(app, cli
 
     assert "הצעת המתנדב" in body
     assert "Five years with Magen David Adom as a volunteer medic." in body
-    assert "מה שהכי השפיע על הציון" not in body
+    # The stored template rationale is shown, rephrased in plain Hebrew.
+    assert "הערכת ה-AI" in body
+    assert "מה שהכי השפיע על הציון" in body
+    # The raw template and the web_lookup token never leak to the screen.
     assert "web_lookup" not in body
     assert "similarity" not in body.lower()
 

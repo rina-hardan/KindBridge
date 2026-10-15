@@ -20,17 +20,18 @@ Follow this skill whenever you implement or change `ProposeMatchCommand`, `agent
 
 ## 2. Matching flow (one request, one match_attempt)
 
-Order is fixed. Do not filter the whole catalogue and then cut to 3. The graph is a Deep Agent supervisor: `search_filter` runs steps 1–3, then `match_analysis` runs steps 4–7. If the delegation call is missing or fails, those same two graphs still run in this order.
+Order is fixed. Do not filter the whole catalogue and then cut to 3. The graph is a Deep Agent supervisor: `search_filter` runs steps 1–3, then `match_analysis` runs steps 4–8. If the delegation call is missing or fails, those same two graphs still run in this order.
 
 1. **Load** the request projection. When `resource_type` is `UNKNOWN`, classify it from the category and the description and store `ResourceTypeClassified`. Then, when `concurrency_type` is `UNKNOWN`, classify it from that resource type (`FLEXIBLE_REMOTE` → `PARALLEL_OK`, otherwise `EXCLUSIVE`, which is also how an unclassified `UNKNOWN` is treated) and store `ConcurrencyClassified`.
 2. **Retrieve (RAG):** embed `description + category + required_skills + frequency` (plus requester accessibility notes when present), query `volunteer_resumes` with `top_n = 15`. New tickets have an empty skill list.
 3. **Hard filter** only those 15 (drop, do not score). Checks from system-spec 4.2: inactive, self-assignment, exemption, declined on this request, unavailability period, geography (Hebrew and English names of a known city match), vehicle, capacity, schedule overlap. Similarity is not a check. There is no `SEMANTIC_FILTER_NO_OVERLAP`.
-4. **Capacity tool:** call `CheckVolunteerCapacityTool` over MCP for each remaining candidate; drop if `eligible = false`. `UNKNOWN` uses the `EXCLUSIVE` cap. One session serves the whole propose.
-5. **Travel tool:** call `CalculateTravelContextTool` over that same session; use its `feasibility`.
-6. **Web context (Tavily MCP):** city-level disruption query, timeout 8 s. On failure skip and set `web_lookup=skipped`. If the model flags `unsafe_travel`, multiply feasibility by 0.5.
-7. **Score and write:** rank everyone who survived, including a score of 0. Keep K = 3. On a first pass, zero candidates means `NoMatchFound` with a rejection summary (counts per check); otherwise `MatchesProposed`. On a refresh of `MATCH_PROPOSED`, write a new `MatchesProposed` with `updated: true` only when the ordered volunteer ids differ; supersede the previous `PROPOSED` rows and mail the admins once. The same ids, or an empty new pool, append nothing and send no mail.
+4. **Offer fit:** the LLM reads the request and the résumé text retrieved from Chroma. It only rejects. Drop a volunteer who explicitly says they do not do, cannot do, or will not do the help this request needs (`offer_mismatch`, counted in `rejection_summary`). A volunteer who does not mention the subject stays. If the call fails, the volunteer stays. The model does not set the score.
+5. **Capacity tool:** call `CheckVolunteerCapacityTool` over MCP for each remaining candidate; drop if `eligible = false`. `UNKNOWN` uses the `EXCLUSIVE` cap. One session serves the whole propose.
+6. **Travel tool:** call `CalculateTravelContextTool` over that same session; use its `feasibility`.
+7. **Web context (Tavily MCP):** city-level disruption query, timeout 8 s. On failure skip and set `web_lookup=skipped`. If the model flags `unsafe_travel`, multiply feasibility by 0.5.
+8. **Score and write:** rank everyone who survived, including a score of 0. Keep K = 3. On a first pass, zero candidates means `NoMatchFound` with a rejection summary (counts per check, including `offer_mismatch`); otherwise `MatchesProposed`. On a refresh of `MATCH_PROPOSED` or `NO_MATCH`, write a new `MatchesProposed` with `updated: true` only when the ordered volunteer ids differ; supersede the previous `PROPOSED` rows and mail the admins once. After `NO_MATCH` that mail says a match has now been found (`found: true`); a changed proposal says it was updated. The same ids, or an empty new pool, append nothing and send no mail. An empty refresh of `NO_MATCH` leaves that status.
 
-The poll also selects `MATCH_PROPOSED` and re-checks it until the request is assigned. Stop after writing. Never approve or assign; that is the admin's decision.
+The poll also selects `MATCH_PROPOSED` and `NO_MATCH` and re-checks them until the request is assigned. Stop after writing. Never approve or assign; that is the admin's decision.
 
 Ids: `exemption_links.volunteer_id` is `users.id`. Assignments and unavailability use `volunteer_profiles.id`. Overlap is allowed only when both tasks are `PARALLEL_OK`.
 
@@ -38,10 +39,9 @@ Ids: `exemption_links.volunteer_id` is `users.id`. Assignments and unavailabilit
 
 ```
 score = 100 * (
-  0.45 * cosine_similarity_clipped   # 0..1 from Chroma
-  + 0.20 * skill_overlap             # |intersection| / |required| after Hebrew/English aliases (1 if required empty)
-  + 0.15 * travel_feasibility        # 1 same city; 0.6 if < 40 km; else 0.2
-  + 0.10 * urgency_fit               # EMERGENCY 1.0, HIGH 0.85, NORMAL 0.7, LOW 0.55
+  0.55 * cosine_similarity_clipped   # 0..1 from Chroma
+  + 0.20 * travel_feasibility        # 1 same city; 0.6 if < 40 km; else 0.2
+  + 0.15 * urgency_fit               # EMERGENCY 1.0, HIGH 0.85, NORMAL 0.7, LOW 0.55
   + 0.05 * vehicle_fit               # 1 if not required or has_vehicle
   + 0.05 * frequency_fit             # request frequency vs volunteer base_frequency; see system-spec 4.6
 )
@@ -51,7 +51,10 @@ If `preferred_date` is before today, multiply by 0.85. The score is computed by 
 
 ## 4. Role of the LLM
 
-- Interprets Tavily results (is travel unsafe today?).
+The model has three jobs: `unsafe_travel`, `refuses`, and the rationale. It never ranks candidates and never changes the numeric score, but it can reject a volunteer who explicitly refused the kind of help.
+
+- Interprets Tavily results (`unsafe_travel`: is travel unsafe today?).
+- Reads the request and the retrieved résumé (`refuses`). True only when the volunteer explicitly says they do not do, cannot do, or will not do what the request needs. Silence on the subject is false. A failure keeps the volunteer. The rejection is `offer_mismatch` in `rejection_summary`.
 - Writes the `ai_rationale` (max 500 characters) in simple Hebrew: top two score components, travel summary, and `web_lookup=ok|skipped`. A reply that is not Hebrew keeps the English template. The admin screen does not show this text; each proposed card shows the volunteer's offer.
 - Never outputs raw chain-of-thought and never changes the numeric score.
 
@@ -59,7 +62,7 @@ If `preferred_date` is before today, multiply by 0.85. The score is computed by 
 
 - Idempotency key `propose:{request_id}:{match_attempt}`. A duplicate Propose is a no-op. A refresh that does not change the ordered volunteers does not consume `match_attempt` and does not mail.
 - `MatchesProposed` payload: array of `{volunteer_id, score, rationale, rank}`, plus `match_attempt` and `k`. `volunteer_id` is `volunteer_profiles.id`. Each proposal also carries `assignment_id` so rebuild does not invent keys.
-- `NoMatchFound` payload: `match_attempt`, `reason`, and `rejection_summary` (counts per hard-filter reason).
+- `NoMatchFound` payload: `match_attempt`, `reason`, and `rejection_summary` (counts per hard-filter reason, plus `offer_mismatch`).
 - Dispatch through the command bus only; the agent never writes SQL directly. The handler lives in `app/commands/match_commands.py`.
 - SUPERSEDED proposals are not a blacklist; only DECLINED volunteers are excluded for that request.
 
@@ -69,5 +72,5 @@ If `preferred_date` is before today, multiply by 0.85. The score is computed by 
 - Empty pool produces `NO_MATCH`.
 - Tavily exception still yields a proposal with `web_lookup=skipped`.
 - Same `(request_id, match_attempt)` does not duplicate assignment rows.
-- A refresh with the same ordered volunteers writes nothing and sends no mail. A different order supersedes the open proposals, stays `MATCH_PROPOSED`, and sends one updated mail. An empty refresh keeps the current proposals.
+- A refresh of `MATCH_PROPOSED` or `NO_MATCH` with the same ordered volunteers writes nothing and sends no mail. A different order supersedes the open proposals, stays or becomes `MATCH_PROPOSED`, and sends one updated mail. An empty refresh keeps the current proposals, or leaves `NO_MATCH` in place.
 - Profile update changes the Chroma document (fake client assertion).

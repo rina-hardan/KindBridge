@@ -1,7 +1,7 @@
 """KindBridge matching process. Run with ``python -m agent.main``.
 
-Polls PENDING_REVIEW and MATCH_PROPOSED requests and dispatches ProposeMatchCommand.
-A request that already has a proposal is checked again until it is assigned.
+Polls PENDING_REVIEW, MATCH_PROPOSED, and NO_MATCH requests and dispatches ProposeMatchCommand.
+A request that already has a proposal, and one that found none, are checked again until it is assigned.
 This process does not approve or assign, and it does not open a local Chroma directory.
 """
 

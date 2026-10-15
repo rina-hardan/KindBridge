@@ -72,6 +72,10 @@
             <p class="mb-1" dir="auto">{{ card.city }}</p>
             {% if details.show_scores %}
             <p class="mb-1">{{ t("request.score") }}: {{ card.score_label if card.score_label else "—" }}</p>
+            {% if card.rationale %}
+            <p class="mb-1 fw-semibold">{{ t("request.rationale") }}</p>
+            <p class="mb-1" dir="auto">{{ explain_rationale(card.rationale) }}</p>
+            {% endif %}
             <p class="mb-1 fw-semibold">{{ t("request.offer") }}</p>
             <p class="mb-0" dir="auto">{{ card.offer if card.offer else "—" }}</p>
             {% endif %}

@@ -50,7 +50,7 @@ def test_register_opens_profile_with_both_entries(client):
 
     assert page.status_code == 200
     assert "הפרופיל שלך".encode() in page.data
-    assert "בקשת עזרה".encode() in page.data
+    assert "הבקשות שלי".encode() in page.data
     assert "התנדבות".encode() in page.data
     assert b"readonly" in page.data
     body = account.get_json()

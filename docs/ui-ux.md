@@ -15,7 +15,7 @@ Goal: professional, calm civic-ops UI (not a marketing landing page). Screen cop
 - Status badges with a fixed color per status: `PENDING_REVIEW`, `MATCH_PROPOSED`, `NO_MATCH`, `ASSIGNED`, `COMPLETED`, `CANCELLED`. Add an `OVERDUE` badge when `preferred_date` is in the past on an open request.
 - Tables: zebra optional, sticky header, pagination (20 rows), empty state with a single CTA.
 - Forms: inline validation; never clear the form on 400; field-level error messages.
-- AI scores: a numeric score on each proposal card; no raw chain-of-thought. On `/requests/<id>` the admin card shows the volunteer's offer (the free-text field from that volunteering profile), the score, and the city. The stored match rationale is not shown.
+- AI scores: a numeric score on each proposal card; no raw chain-of-thought. On `/requests/<id>` the admin card shows the volunteer's offer (the free-text field from that volunteering profile), the score, the city, and the stored match rationale under an "AI assessment" label, rephrased to plain language by `explain_rationale` (the raw template and the `web_lookup=` token never reach the screen).
 - Address and phone: masked `••••` from a volunteer until that volunteer completes the task. An admin sees them on the request.
 - Every action shows feedback (success toast or error message) and a loading state on the button while the request runs.
 

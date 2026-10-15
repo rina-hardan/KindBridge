@@ -53,7 +53,7 @@ class SqlMatchingReader:
         )
         stmt = (
             select(help_requests.c.id, help_requests.c.match_attempt)
-            .where(help_requests.c.status.in_(("PENDING_REVIEW", "MATCH_PROPOSED")))
+            .where(help_requests.c.status.in_(("PENDING_REVIEW", "MATCH_PROPOSED", "NO_MATCH")))
             .order_by(urgency_order, status_order, help_requests.c.created_at)
             .limit(limit)
         )

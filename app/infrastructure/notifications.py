@@ -63,6 +63,8 @@ _TEXT = {
         "proposed_intro": "הסוכן הציע מתנדבים לבקשה, וההצעה ממתינה לאישור מנהל.",
         "proposed_updated_subject": "הצעת ההתאמה עודכנה וממתינה לבדיקה",
         "proposed_updated_intro": "הסוכן מצא התאמות מתאימות יותר. ההצעה הקודמת הוחלפה, וההצעה המעודכנת ממתינה לאישור מנהל.",
+        "proposed_found_subject": "כעת נמצאה התאמה וממתינה לבדיקה",
+        "proposed_found_intro": "הסוכן מצא כעת התאמה לבקשה, וההצעה ממתינה לאישור מנהל.",
         "candidates": "מועמדים מובילים:",
         "score": "ציון",
         "no_match_subject": "לא נמצאה התאמה לבקשה, נדרשת בדיקה",
@@ -77,6 +79,7 @@ _TEXT = {
         "rejection.vehicle": "חסר רכב",
         "rejection.capacity": "אין קיבולת",
         "rejection.schedule_overlap": "חפיפה בלוח הזמנים",
+        "rejection.offer_mismatch": "ההצעה של המתנדב לא מתאימה לבקשה",
     },
     "en": {
         "hello": "Hello {name},",
@@ -110,6 +113,8 @@ _TEXT = {
         "proposed_intro": "The agent proposed volunteers for a request. An admin needs to review the proposal.",
         "proposed_updated_subject": "Updated match proposal waiting for review",
         "proposed_updated_intro": "The agent found a more suitable match. The previous proposal was replaced, and the updated proposal is waiting for an admin.",
+        "proposed_found_subject": "A match has now been found and is waiting for review",
+        "proposed_found_intro": "The agent has now found a match for the request. The proposal is waiting for an admin.",
         "candidates": "Top candidates:",
         "score": "score",
         "no_match_subject": "No match found for a request, review needed",
@@ -124,6 +129,7 @@ _TEXT = {
         "rejection.vehicle": "no vehicle",
         "rejection.capacity": "no capacity",
         "rejection.schedule_overlap": "schedule overlap",
+        "rejection.offer_mismatch": "offer does not fit the request",
     },
 }
 
@@ -239,13 +245,18 @@ def matches_proposed_to_admin(
     lang: str = "he",
     *,
     updated: bool = False,
+    found: bool = False,
 ) -> MailContent:
     lines = [
         f"{rank}. {_one_line(item.name)} ({_t(lang, 'score')} {item.score:.0f})"
         for rank, item in enumerate(candidates, start=1)
     ]
-    intro = "proposed_updated_intro" if updated else "proposed_intro"
-    subject = "proposed_updated_subject" if updated else "proposed_subject"
+    if found:
+        intro, subject = "proposed_found_intro", "proposed_found_subject"
+    elif updated:
+        intro, subject = "proposed_updated_intro", "proposed_updated_subject"
+    else:
+        intro, subject = "proposed_intro", "proposed_subject"
     body = [
         _t(lang, intro),
         *_facts(lang, request, with_id=True),

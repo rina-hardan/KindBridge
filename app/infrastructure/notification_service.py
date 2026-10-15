@@ -163,7 +163,12 @@ class NotificationService:
         link = self._request_link(request_id)
         if event_type == MATCHES_PROPOSED:
             mail = mails.matches_proposed_to_admin(
-                info, candidates, link, _LANG, updated=bool(payload.get("updated"))
+                info,
+                candidates,
+                link,
+                _LANG,
+                updated=bool(payload.get("updated")),
+                found=bool(payload.get("found")),
             )
         else:
             summary = payload.get("rejection_summary")

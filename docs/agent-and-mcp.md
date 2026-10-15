@@ -9,34 +9,35 @@ Poll every 15s:
 ```sql
 SELECT TOP 10 id, match_attempt, status
 FROM help_requests
-WHERE status IN ('PENDING_REVIEW', 'MATCH_PROPOSED')
+WHERE status IN ('PENDING_REVIEW', 'MATCH_PROPOSED', 'NO_MATCH')
 ORDER BY CASE urgency WHEN 'EMERGENCY' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'NORMAL' THEN 2 ELSE 3 END,
          CASE status WHEN 'PENDING_REVIEW' THEN 0 ELSE 1 END,
          created_at;
 ```
 
-`ASSIGNED`, `NO_MATCH`, `COMPLETED`, and `CANCELLED` stay out of this query. A request that already has a proposal is checked again on every poll until an admin assigns it (or it leaves `MATCH_PROPOSED` another way). For each row, dispatch `ProposeMatchCommand` for the current `match_attempt` using idempotency key `propose:{id}:{match_attempt}`.
+`ASSIGNED`, `COMPLETED`, and `CANCELLED` stay out of this query. A request in `MATCH_PROPOSED` or `NO_MATCH` is checked again on every poll with the same refresh rules, until an admin assigns it (or it leaves that status another way). For each row, dispatch `ProposeMatchCommand` for the current `match_attempt` using idempotency key `propose:{id}:{match_attempt}`.
 
 ## 2. Deep Agent graph
 
-Implementation: `deepagents.create_deep_agent` supervises two compiled sub-agents. The seven stages below stay in this order. The supervisor does not score, approve, or assign.
+Implementation: `deepagents.create_deep_agent` supervises two compiled sub-agents. The eight stages below stay in this order. The supervisor does not score, approve, or assign.
 
 - **search_filter** runs stages 1–3 (load, retrieve, hard filter).
-- **match_analysis** runs stages 4–7 (capacity, travel, web, score and write). Each of those stages returns immediately when the request was already stopped.
+- **match_analysis** runs stages 4–8 (offer fit, capacity, travel, web, score and write). Each of those stages returns immediately when the request was already stopped.
 
 The general-purpose sub-agent is disabled, and filesystem tools are not offered to the supervisor, so it cannot read or write project files.
 
-The chat model is the one already configured by `LLM_PROVIDER` / `LLM_MODEL` (section 2.1). It may only delegate to these two sub-agents, in this order, and then stop. When no model is configured, the delegation call fails, or a sub-agent did not run, the process runs that sub-agent graph itself. A failed delegation never blocks a proposal and never changes the numeric score.
+The chat model is the one already configured by `LLM_PROVIDER` / `LLM_MODEL` (section 2.1). It may only delegate to these two sub-agents, in this order, and then stop. It delegates one sub-agent per reply: the two share one `MatchWork`, and LangGraph runs the tool calls of a single reply in parallel, so `match_analysis` would otherwise start before `search_filter` loaded the request. A reply that delegates both is trimmed to its first call (`_OneDelegationPerReply` in `agent/graph.py`), which sends the second delegation to the next turn. The sub-agents are reached through the deepagents `task` tool with a `subagent_type` argument, and the delegation prompt names that tool: a prompt that names the sub-agents directly makes a small local model emit tool calls named `search_filter` / `match_analysis`, and Ollama discards calls to names it was not given, so nothing is delegated at all. When no model is configured, the delegation call fails, or a sub-agent did not run, the process runs that sub-agent graph itself. A failed delegation never blocks a proposal and never changes the numeric score.
 
 Nodes:
 
 1. **Load**: request projection. If `resource_type` is `UNKNOWN`, classify it from the category and the description (system-spec delivery rules) and append `ResourceTypeClassified` before filtering. Then, if `concurrency_type` is `UNKNOWN`, classify it from that resource type and append `ConcurrencyClassified`. `FLEXIBLE_REMOTE` leans `PARALLEL_OK`; every other type, including a value that is still `UNKNOWN`, is `EXCLUSIVE`.
 2. **Retrieve (RAG)**: embed `description + category + required_skills + frequency`, plus the requester's accessibility notes when they exist. New tickets have an empty skill list. Query Chroma collection `volunteer_resumes`, `top_n = 15`. This happens before the hard filter. Do not take the top 3 and then filter them.
 3. **Hard filter** (system-spec 4.2), applied only to those 15: inactive (`is_enabled = 0`, `users.is_active = 0`, or `availability_status = INACTIVE`), self-assignment, exemption, `DECLINED` on this request, unavailability period, geography, vehicle, capacity, schedule overlap. Semantic similarity is not a rejection. A volunteer with similarity 0 who passes the filter is still ranked. There is no `SEMANTIC_FILTER_NO_OVERLAP`.
-4. **Capacity tool (MCP Studio)**: `CheckVolunteerCapacityTool` on each survivor. `UNKNOWN` uses the exclusive cap (`current_active_tasks < max_active_tasks`). `PARALLEL_OK` uses `current_parallel_tasks < max_parallel_tasks`.
-5. **Travel tool (MCP Studio)**: `CalculateTravelContextTool`.
-6. **Web (Tavily MCP)**: city-level context (weather disruption, transit strike, municipal holiday). Timeout 8s; on failure skip.
-7. **Score & write**: rank everyone still eligible, including score 0; take **K = 3**. On a first pass (`PENDING_REVIEW`), zero candidates -> `NoMatchFound` with `rejection_summary` (counts per check). Otherwise `MatchesProposed`. On a refresh (`MATCH_PROPOSED`), compare the new ordered volunteer ids with the open `PROPOSED` rows. The same people in the same order, or an empty new pool, appends nothing and sends no mail; `match_attempt` stays put so the next poll checks again. A different order appends `MatchesProposed` with `updated: true`, supersedes the previous `PROPOSED` rows, leaves the status `MATCH_PROPOSED`, and mails the admins once. Both events go through `ProposeMatchCommand` (`app/commands/match_commands.py`). The agent does not approve or assign.
+4. **Offer fit**: the LLM reads the request text and the volunteer résumé retrieved from Chroma. It only rejects. A volunteer who explicitly says they do not do, cannot do, or will not do the help this request needs is dropped (`offer_mismatch`, counted in `rejection_summary`). A volunteer who does not mention the subject stays. If the call fails, the volunteer stays. A failed call never blocks a proposal and never changes the numeric score.
+5. **Capacity tool (MCP Studio)**: `CheckVolunteerCapacityTool` on each survivor. `UNKNOWN` uses the exclusive cap (`current_active_tasks < max_active_tasks`). `PARALLEL_OK` uses `current_parallel_tasks < max_parallel_tasks`.
+6. **Travel tool (MCP Studio)**: `CalculateTravelContextTool`.
+7. **Web (Tavily MCP)**: city-level context (weather disruption, transit strike, municipal holiday). Timeout 8s; on failure skip.
+8. **Score & write**: rank everyone still eligible, including score 0; take **K = 3**. On a first pass (`PENDING_REVIEW`), zero candidates -> `NoMatchFound` with `rejection_summary` (counts per check, including `offer_mismatch`). Otherwise `MatchesProposed`. On a refresh (`MATCH_PROPOSED` or `NO_MATCH`), compare the new ordered volunteer ids with the open `PROPOSED` rows. The same people in the same order, or an empty new pool, appends nothing and sends no mail; `match_attempt` stays put so the next poll checks again. An empty re-check of `NO_MATCH` leaves that status. A different order appends `MatchesProposed` with `updated: true` (`found: true` only after `NO_MATCH`), supersedes the previous `PROPOSED` rows, leaves the status `MATCH_PROPOSED`, and mails the admins once. After `NO_MATCH` that mail says a match has now been found. Both events go through `ProposeMatchCommand` (`app/commands/match_commands.py`). The agent does not approve or assign.
 
 `exemption_links.volunteer_id` is `users.id`. `task_assignments.volunteer_id` and `volunteer_unavailability.volunteer_id` are `volunteer_profiles.id`. Comparing a profile id to an exemption row will not exclude anyone.
 
@@ -46,12 +47,13 @@ HITL: graph **stops** after writing proposals. Approve/reject is only HTTP/admin
 
 ### 2.1 LLM role and model
 
-The score is computed by deterministic code (section 3), never by the LLM. The LLM is used for exactly two things:
+The score is computed by deterministic code (section 3), never by the LLM. The LLM is used for exactly three things:
 
 1. Interpret the Tavily result and return `unsafe_travel: true|false` (structured JSON output).
-2. Write the `ai_rationale` text (max 500 chars) in simple Hebrew from the already-computed score components. The stored text still ends with `web_lookup=ok|skipped`. If the reply is empty or not Hebrew, keep the English template. The admin request screen does not show this text. Each proposed card shows the volunteer's offer from that profile, with the score and city.
+2. Read the request and the retrieved résumé and return `refuses: true|false` (structured JSON). True only when the volunteer explicitly says they do not do, cannot do, or will not do what the request needs. A volunteer who does not mention the subject is false. A true result drops that candidate as `offer_mismatch` (counted in `rejection_summary`). The model does not rank and does not change the score.
+3. Write the `ai_rationale` text (max 500 chars) in simple Hebrew from the already-computed score components. The stored text still ends with `web_lookup=ok|skipped`. If the reply is empty or not Hebrew, keep the English template. The admin request screen shows this text on each proposed card, rephrased to plain language by `explain_rationale` (the trailing `web_lookup=` token is replaced with a sentence and never reaches the screen), together with the volunteer's offer, the score, and the city.
 
-The LLM never ranks candidates, never changes a score, and never dispatches commands; the graph does. The supervisor's delegation call is not a third judgment: if it fails, the graph runs the two sub-agents in order (section 2).
+The LLM never ranks candidates and never changes a score, but it can reject a candidate who explicitly refused. It never dispatches commands; the graph does. The supervisor's delegation call is not another judgment: if it fails, the graph runs the two sub-agents in order (section 2).
 
 Model configuration (environment variables, documented in `.env.example`):
 
@@ -63,16 +65,15 @@ Model configuration (environment variables, documented in `.env.example`):
 
 The chosen provider and model must be written in the project `README.md`.
 
-Each LLM call waits 90s. An Ollama call also stops after 256 generated tokens, so a local model returns a short answer inside that wait instead of running until the clock expires. If the call fails, exceeds 90s, or does not return Hebrew: use a template rationale (top two score components + travel summary) and `unsafe_travel = false`. A failed LLM call never blocks proposals.
+Each LLM call waits 90s. An Ollama call also stops after 256 generated tokens, so a local model returns a short answer inside that wait instead of running until the clock expires. The supervisor's delegation call is the one exception: it is capped at 2048 tokens (`SUPERVISOR_NUM_PREDICT` in `agent/graph.py`), because a 256-token cap truncates its tool calls mid-JSON and delegation then never happens. If the call fails, exceeds 90s, or does not return Hebrew: use a template rationale (top two score components + travel summary) and `unsafe_travel = false`. A failed `refuses` call keeps that volunteer. A failed LLM call never blocks proposals.
 
 ## 3. Score formula (`ai_score` 0-100)
 
 ```
 score = 100 * (
-  0.45 * cosine_similarity_clipped   # 0..1 from Chroma
-  + 0.20 * skill_overlap               # |intersection| / |required| after Hebrew/English aliases (1 if required empty; new tickets do not separate candidates)
-  + 0.15 * travel_feasibility          # 1 if same city; 0.6 if tool distance < 40km; else 0.2
-  + 0.10 * urgency_fit                 # EMERGENCY 1.0, HIGH 0.85, NORMAL 0.7, LOW 0.55 (availability already filtered)
+  0.55 * cosine_similarity_clipped   # 0..1 from Chroma
+  + 0.20 * travel_feasibility          # 1 if same city; 0.6 if tool distance < 40km; else 0.2
+  + 0.15 * urgency_fit                 # EMERGENCY 1.0, HIGH 0.85, NORMAL 0.7, LOW 0.55 (availability already filtered)
   + 0.05 * vehicle_fit                 # 1 if not required or has_vehicle
   + 0.05 * frequency_fit               # request frequency vs volunteer base_frequency; see system-spec 4.6
 )
@@ -180,7 +181,7 @@ class Notifier(Protocol):
 | `AssignmentOverridden` | Flask | assigned volunteer and requester |
 | `HelpRequestCancelled`, only when the status was `ASSIGNED` | Flask | the assigned volunteer |
 | `TaskReleased` | Flask | requester and admin(s), via `ReleaseTaskCommand` |
-| `MatchesProposed` | **agent** | admin(s): "New match proposal waiting for review" with request id, category, city, urgency, the top candidates (name and `ai_score`), and a link to `/requests/<id>`. When the payload has `updated: true`, the subject and intro say the proposal was updated |
+| `MatchesProposed` | **agent** | admin(s): "New match proposal waiting for review" with request id, category, city, urgency, the top candidates (name and `ai_score`), and a link to `/requests/<id>`. When the payload has `updated: true`, the subject and intro say the proposal was updated. When it also has `found: true` (a match after `NO_MATCH`), they say a match has now been found |
 | `NoMatchFound` | **agent** | admin(s): the same facts plus the `rejection_summary` |
 
 **Idempotency of the admin mail.** `ProposeMatchCommand` is idempotent per `(request_id, match_attempt)`. The mail is sent only by the run that actually appended `MatchesProposed` or `NoMatchFound`; a repeated poll of the same attempt is a no-op and sends nothing. A refresh that finds the same ordered volunteers also appends nothing and sends nothing. A proposal that fails to commit (for example a concurrency conflict) sends nothing.

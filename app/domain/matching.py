@@ -229,7 +229,6 @@ def cities_match(left: str, right: str) -> bool:
 def score_candidate(
     *,
     similarity: float,
-    skills: float,
     travel_feasibility: float,
     urgency: str,
     has_vehicle_fit: bool,
@@ -240,10 +239,9 @@ def score_candidate(
 ) -> tuple[float, dict[str, float]]:
     """Weighted ai_score in 0..100. The LLM does not supply this number."""
     parts = {
-        "similarity": 0.45 * _unit(similarity),
-        "skills": 0.20 * _unit(skills),
-        "travel": 0.15 * _unit(travel_feasibility),
-        "urgency": 0.10 * URGENCY_FIT.get(urgency, 0.55),
+        "similarity": 0.55 * _unit(similarity),
+        "travel": 0.20 * _unit(travel_feasibility),
+        "urgency": 0.15 * URGENCY_FIT.get(urgency, 0.55),
         "vehicle": 0.05 * (1.0 if has_vehicle_fit else 0.0),
         "frequency": 0.05 * frequency_fit(request_frequency, frequency),
     }

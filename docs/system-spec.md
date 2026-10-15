@@ -269,7 +269,7 @@ Lockout: 5 failures within 15 minutes for the same email.
 
 ### 4.1 Help request status
 
-`PENDING_REVIEW` -> `MATCH_PROPOSED` | `NO_MATCH`; `MATCH_PROPOSED` stays `MATCH_PROPOSED` when a later check finds a different top K, then -> `ASSIGNED` -> `COMPLETED`; `NO_MATCH` -> `PENDING_REVIEW` (retrigger) or `ASSIGNED` (override).
+`PENDING_REVIEW` -> `MATCH_PROPOSED` | `NO_MATCH`. A later check of `MATCH_PROPOSED` or `NO_MATCH` stays put when the ordered volunteers do not change, and becomes `MATCH_PROPOSED` when they do, then -> `ASSIGNED` -> `COMPLETED`. `NO_MATCH` -> `PENDING_REVIEW` (retrigger) or `ASSIGNED` (override).
 `ASSIGNED` -> `PENDING_REVIEW` when the volunteer releases.
 Any of `PENDING_REVIEW`, `MATCH_PROPOSED`, `NO_MATCH`, `ASSIGNED` -> `CANCELLED`.
 
@@ -279,6 +279,7 @@ flowchart LR
   pending --> proposed[MATCH_PROPOSED]
   pending --> noMatch[NO_MATCH]
   noMatch -->|retrigger| pending
+  noMatch -->|updated match| proposed
   noMatch -->|override| assigned
   proposed -->|updated match| proposed
   proposed -->|approve_or_override| assigned[ASSIGNED]
@@ -299,8 +300,8 @@ flowchart LR
 | - | `SubmitHelpRequestCommand` | `HelpRequestCreated` | `PENDING_REVIEW` | Non-admin with a requester profile; enqueue agent. `resource_type` is `UNKNOWN`, `required_skills` is `[]`, `estimated_duration_min` is null, and `frequency` is one of the four cadence values |
 | `PENDING_REVIEW` | `ClassifyConcurrencyCommand` | `ConcurrencyClassified` | (unchanged) | **[NEW]** Agent or admin. See 4.4 |
 | `PENDING_REVIEW` | `ProposeMatchCommand` | `MatchesProposed` | `MATCH_PROPOSED` | Agent only; writes 1..K `PROPOSED` rows; increments `match_attempt`; applies the hard filter in 4.2 |
-| `MATCH_PROPOSED` | `ProposeMatchCommand` | `MatchesProposed` (`updated: true`) | `MATCH_PROPOSED` | Agent re-checks until the request is assigned. Writes a new batch only when the ordered volunteer ids differ; previous `PROPOSED` -> `SUPERSEDED`; admins get one updated mail. The same ids, or an empty new pool, append nothing and send no mail |
-| `PENDING_REVIEW` | `ProposeMatchCommand` (empty pool) | `NoMatchFound` | `NO_MATCH` | Admin notified; no assignment rows; payload carries the **rejection summary** (counts per filter reason). A refresh of `MATCH_PROPOSED` does not take this path |
+| `MATCH_PROPOSED` or `NO_MATCH` | `ProposeMatchCommand` | `MatchesProposed` (`updated: true`; `found: true` only after `NO_MATCH`) | `MATCH_PROPOSED` | Agent re-checks both until the request is assigned, using the same rules. Writes a new batch only when the ordered volunteer ids differ; previous `PROPOSED` -> `SUPERSEDED`; admins get one mail. After `NO_MATCH` that mail says a match has now been found; otherwise it says the proposal was updated. The same ids, or an empty new pool, append nothing and send no mail. An empty re-check of `NO_MATCH` stays `NO_MATCH` |
+| `PENDING_REVIEW` | `ProposeMatchCommand` (empty pool) | `NoMatchFound` | `NO_MATCH` | Admin notified; no assignment rows; payload carries the **rejection summary** (counts per filter reason). A refresh of `MATCH_PROPOSED` or `NO_MATCH` does not take this path |
 | `NO_MATCH` or `MATCH_PROPOSED` | `RetriggerMatchCommand` | `MatchRetriggered` | `PENDING_REVIEW` | Admin; previous `PROPOSED` -> `SUPERSEDED` |
 | `MATCH_PROPOSED` | `ApproveAssignmentCommand` | `AssignmentApproved` | `ASSIGNED` | Admin; fails if `is_self_assignment` or the volunteer no longer passes the capacity/overlap checks; chosen assignment -> `ASSIGNED`; siblings -> `SUPERSEDED`; increment the matching volunteer counter; Gmail notify volunteer (and requester); do not expose address or phone yet; the volunteer sees them only after `COMPLETED` |
 | `MATCH_PROPOSED` | `RejectAssignmentCommand` | `AssignmentsRejected` | `PENDING_REVIEW` | Admin; **all** current `PROPOSED` -> `DECLINED` with reason; those volunteers blacklisted for **this request only**; re-queue agent |
@@ -366,7 +367,7 @@ Some tasks can run alongside others (a short phone check-in) and some cannot (ac
 
 ### 4.6 Scoring (stage 2, soft)
 
-Only volunteers who passed 4.2 are ranked. Inputs: semantic similarity between the request text (description, category, frequency, and requester accessibility notes) and the volunteer resume (ChromaDB); required-skill coverage, which is 1 for every candidate while `required_skills_json` is `[]` and therefore does not separate them; frequency fit between the request `frequency` and the volunteer's `base_frequency` (weight 0.05, never a hard filter); continuity bonus (series, deferred); urgency weight; overdue penalty. A one-off request (`ON_DEMAND`) keeps the volunteer bonus (`ON_DEMAND` 1.0, `WEEKLY` 0.9, `BIWEEKLY` 0.8, `MONTHLY` 0.7). The same cadence is 1.0. A volunteer who can help at least that often is 0.9. An on-demand volunteer for a repeating cadence is 0.75. A less frequent volunteer is 0.5. Top **3** become `PROPOSED` with `ai_score` and `ai_rationale`. Details in [agent-and-mcp.md](agent-and-mcp.md).
+Only volunteers who passed 4.2 are ranked. Inputs: semantic similarity between the request text (description, category, frequency, and requester accessibility notes) and the volunteer resume (ChromaDB, weight 0.55); travel feasibility (weight 0.20); urgency (weight 0.15); vehicle fit (weight 0.05); frequency fit between the request `frequency` and the volunteer's `base_frequency` (weight 0.05, never a hard filter); continuity bonus (series, deferred); overdue penalty. A one-off request (`ON_DEMAND`) keeps the volunteer bonus (`ON_DEMAND` 1.0, `WEEKLY` 0.9, `BIWEEKLY` 0.8, `MONTHLY` 0.7). The same cadence is 1.0. A volunteer who can help at least that often is 0.9. An on-demand volunteer for a repeating cadence is 0.75. A less frequent volunteer is 0.5. Top **3** become `PROPOSED` with `ai_score` and `ai_rationale`. Details in [agent-and-mcp.md](agent-and-mcp.md).
 
 ---
 

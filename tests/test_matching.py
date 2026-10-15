@@ -97,7 +97,7 @@ def _hit(profile_id, similarity=1.0):
     return ResumeHit(profile_id=str(profile_id), similarity=similarity, document="resume", metadata={})
 
 
-def _handler(engine, clock, resumes, web=None, studio=None):
+def _handler(engine, clock, resumes, web=None, studio=None, fit=None):
     return MatchCommandHandlers(
         engine=engine,
         event_store=SqlEventStore(engine=engine),
@@ -108,6 +108,7 @@ def _handler(engine, clock, resumes, web=None, studio=None):
         web=web,
         sleep=lambda _seconds: None,
         studio=studio,
+        fit=fit,
     )
 
 
@@ -432,6 +433,48 @@ def test_tavily_failure_still_proposes_with_skipped_lookup(engine, clock):
     assert "web_lookup=skipped" in assignments[0]["ai_rationale"]
 
 
+def test_explicit_refusal_is_not_proposed(engine, clock):
+    class Fit:
+        def refuses(self, request_text: str, offer: str) -> bool:
+            return "קניות" in request_text and offer == "אני לא עושה קניות"
+
+    requester = uuid4()
+    request_id = uuid4()
+    with engine.begin() as conn:
+        _user(conn, requester, "requester@example.com")
+        profile_id = _volunteer(conn)[1]
+    _open_request(engine, request_id, requester, description="צריך עזרה בקניות", category="errands")
+    hit = ResumeHit(profile_id=str(profile_id), similarity=1.0, document="אני לא עושה קניות", metadata={})
+
+    result = _propose(_handler(engine, clock, Catalog([hit]), fit=Fit()), request_id)
+
+    request, assignments, events = _rows(engine, request_id)
+    assert result.outcome == "no_match"
+    assert request["status"] == "NO_MATCH"
+    assert assignments == []
+    found = next(event for event in events if event.event_type == "NoMatchFound")
+    assert found.payload["rejection_summary"] == {"offer_mismatch": 1}
+
+
+def test_fit_failure_still_proposes(engine, clock):
+    class Fit:
+        def refuses(self, request_text: str, offer: str) -> bool:
+            raise RuntimeError("llm down")
+
+    requester = uuid4()
+    request_id = uuid4()
+    with engine.begin() as conn:
+        _user(conn, requester, "requester@example.com")
+        profile_id = _volunteer(conn)[1]
+    _open_request(engine, request_id, requester)
+
+    result = _propose(_handler(engine, clock, Catalog([_hit(profile_id)]), fit=Fit()), request_id)
+
+    _request, assignments, _events = _rows(engine, request_id)
+    assert result.outcome == "proposed"
+    assert len(assignments) == 1
+
+
 def test_same_match_attempt_does_not_duplicate_rows(engine, clock):
     requester = uuid4()
     request_id = uuid4()
@@ -620,6 +663,7 @@ def test_pending_poll_orders_emergency_first(engine):
     low = uuid4()
     urgent = uuid4()
     proposed = uuid4()
+    unmatched = uuid4()
     assigned = uuid4()
     requester = uuid4()
     stamp = datetime(2026, 10, 6, 8, 0, 0)
@@ -629,6 +673,7 @@ def test_pending_poll_orders_emergency_first(engine):
             (low, "NORMAL", "PENDING_REVIEW", stamp),
             (urgent, "EMERGENCY", "PENDING_REVIEW", datetime(2026, 10, 6, 11, 0, 0)),
             (proposed, "EMERGENCY", "MATCH_PROPOSED", stamp),
+            (unmatched, "EMERGENCY", "NO_MATCH", datetime(2026, 10, 6, 9, 0, 0)),
             (assigned, "EMERGENCY", "ASSIGNED", stamp),
         ):
             conn.execute(
@@ -651,7 +696,7 @@ def test_pending_poll_orders_emergency_first(engine):
             )
         pending = SqlMatchingReader().pending_requests(conn)
 
-    assert [row.request_id for row in pending] == [urgent, proposed, low]
+    assert [row.request_id for row in pending] == [urgent, proposed, unmatched, low]
 
 
 def test_refresh_with_the_same_volunteers_writes_nothing(engine, clock):
@@ -706,6 +751,54 @@ def test_refresh_replaces_proposals_when_a_closer_volunteer_appears(engine, cloc
     assert {str(row["volunteer_id"]) for row in proposed} == {str(strong), str(weak)}
     assert [str(row["volunteer_id"]) for row in superseded] == [str(weak)]
     assert updated[-1].payload["updated"] is True
+
+
+def test_refresh_of_no_match_proposes_when_a_volunteer_appears(engine, clock):
+    requester = uuid4()
+    request_id = uuid4()
+    with engine.begin() as conn:
+        _user(conn, requester, "requester@example.com")
+        profile_id = _volunteer(conn)[1]
+    _open_request(engine, request_id, requester)
+    catalog = Catalog([])
+    handler = _handler(engine, clock, catalog)
+    _propose(handler, request_id)
+    request, _assignments, events = _rows(engine, request_id)
+    catalog.hits = [_hit(profile_id, 0.9)]
+
+    result = _propose(handler, request_id, match_attempt=int(request["match_attempt"]))
+
+    again, assignments, later = _rows(engine, request_id)
+    updated = [event for event in later if event.event_type == "MatchesProposed"]
+    assert result.outcome == "proposed"
+    assert again["status"] == "MATCH_PROPOSED"
+    assert [row["status"] for row in assignments] == ["PROPOSED"]
+    assert str(assignments[0]["volunteer_id"]) == str(profile_id)
+    assert updated[-1].payload["updated"] is True
+    assert updated[-1].payload["found"] is True
+    assert sum(event.event_type == "NoMatchFound" for event in later) == 1
+    assert len(later) == len(events) + 1
+
+
+def test_refresh_of_no_match_with_an_empty_pool_writes_nothing(engine, clock):
+    requester = uuid4()
+    request_id = uuid4()
+    with engine.begin() as conn:
+        _user(conn, requester, "requester@example.com")
+    _open_request(engine, request_id, requester)
+    handler = _handler(engine, clock, Catalog([]))
+    _propose(handler, request_id)
+    request, _assignments, events = _rows(engine, request_id)
+
+    result = _propose(handler, request_id, match_attempt=int(request["match_attempt"]))
+
+    again, assignments, later = _rows(engine, request_id)
+    assert result.outcome == "unchanged"
+    assert again["status"] == "NO_MATCH"
+    assert int(again["match_attempt"]) == int(request["match_attempt"])
+    assert assignments == []
+    assert len(later) == len(events)
+    assert sum(event.event_type == "NoMatchFound" for event in later) == 1
 
 
 def test_refresh_with_an_empty_pool_keeps_the_current_proposals(engine, clock):
@@ -784,7 +877,6 @@ def test_hard_filter_rules_and_score_formula():
 
     score, parts = score_candidate(
         similarity=1,
-        skills=1,
         travel_feasibility=1,
         urgency="EMERGENCY",
         has_vehicle_fit=True,
@@ -793,10 +885,12 @@ def test_hard_filter_rules_and_score_formula():
         today=datetime(2026, 10, 6).date(),
     )
     assert score == 100
-    assert parts["similarity"] == 0.45
+    assert parts["similarity"] == 0.55
+    assert parts["travel"] == 0.20
+    assert parts["urgency"] == 0.15
+    assert "skills" not in parts
     overdue, _parts = score_candidate(
         similarity=1,
-        skills=1,
         travel_feasibility=1,
         urgency="EMERGENCY",
         has_vehicle_fit=True,

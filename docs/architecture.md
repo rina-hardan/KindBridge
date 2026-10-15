@@ -67,7 +67,7 @@ Browser / Jinja
               -> repositories/event_store.append -> projections/projectors
         -> queries/        -> read SQL projections only
 Background agent process
-    -> poll requests with status = PENDING_REVIEW or MATCH_PROPOSED
+    -> poll requests with status = PENDING_REVIEW, MATCH_PROPOSED, or NO_MATCH
     -> MCP tools + Chroma RAG (via infrastructure/vector_store.py)
     -> ProposeMatchCommand (same command bus)
 ```
@@ -222,7 +222,7 @@ The agent does not call HTTP; it imports the command bus in-process (or via a lo
 Three processes:
 
 1. **Flask** (Waitress/gunicorn-equivalent on Windows/Somee as required): HTTP.
-2. **KindBridge agent**: `python -m agent.main`, poll interval **15 seconds**, `SELECT` requests with `status` in `PENDING_REVIEW` or `MATCH_PROPOSED` (see [agent-and-mcp.md](agent-and-mcp.md) section 1). `MATCH_PROPOSED` is re-checked until the request is assigned; a new event and admin mail happen only when the ordered volunteers change.
+2. **KindBridge agent**: `python -m agent.main`, poll interval **15 seconds**, `SELECT` requests with `status` in `PENDING_REVIEW`, `MATCH_PROPOSED`, or `NO_MATCH` (see [agent-and-mcp.md](agent-and-mcp.md) section 1). `MATCH_PROPOSED` and `NO_MATCH` are re-checked until the request is assigned; a new event and admin mail happen only when the ordered volunteers change.
 3. **Chroma**: runs as a sidecar server (`chroma run --path ./chroma_data`). Both Flask (upsert on profile update) and the agent (query) connect to it as clients through `app/infrastructure/vector_store.py`. Never let two processes write to the same local Chroma directory.
 
 SQL Server is remote (Somee). Secrets only in environment: `DATABASE_URL`, `JWT_SECRET`, `OPENAI_API_KEY`, `TAVILY_API_KEY`, `GMAIL_MCP_*`, `CHROMA_HOST`, `CHROMA_PORT`, `LLM_PROVIDER`, `LLM_MODEL`, `OLLAMA_BASE_URL`, `ADMIN_BOOTSTRAP_EMAIL`. Provide `.env.example` without real values; `.env` and `chroma_data/` are in `.gitignore`.
@@ -232,7 +232,7 @@ SQL Server is remote (Somee). Secrets only in environment: `DATABASE_URL`, `JWT_
 | Failure | Behavior |
 | :--- | :--- |
 | Tavily timeout/error | Continue scoring with travel tool + RAG only; rationale notes `web_lookup=skipped`; do not fail the whole match |
-| No eligible volunteers | First pass: `NoMatchFound` -> `NO_MATCH`. Refresh of `MATCH_PROPOSED`: keep the current proposals and send no mail |
+| No eligible volunteers | First pass: `NoMatchFound` -> `NO_MATCH`. Refresh of `MATCH_PROPOSED` or `NO_MATCH`: append nothing and send no mail |
 | Embedding API down | Retry 3x exponential backoff; leave ticket `PENDING_REVIEW`; log `embedding_failed` |
 | Chroma server down | Profile save still commits the event; vector upsert is retried; agent leaves ticket `PENDING_REVIEW` and logs `vector_store_unavailable` |
 | Gmail MCP down | Assignment still commits. The notifier retries 3 times (10 s timeout each, backoff), then logs `notify_failed` and returns. There is no durable retry queue in v1 |

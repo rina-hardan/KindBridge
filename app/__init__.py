@@ -9,7 +9,13 @@ from sqlalchemy import Engine
 
 from app.commands.bus import CommandBus
 from app.commands.exemption_commands import ExemptionCommandHandlers
-from app.commands.match_commands import FallbackRationale, MatchCommandHandlers, TemplateRationale, _LlmSafety
+from app.commands.match_commands import (
+    FallbackRationale,
+    MatchCommandHandlers,
+    TemplateRationale,
+    _LlmFit,
+    _LlmSafety,
+)
 from app.commands.request_commands import RequestCommandHandlers
 from app.commands.user_commands import Clock, UserCommandHandlers, utc_now
 from app.config import Config
@@ -119,6 +125,7 @@ def build_services(
         clock=clock,
         web=build_web_search(config),
         safety=_LlmSafety(chat) if chat is not None else None,
+        fit=_LlmFit(chat) if chat is not None else None,
         rationale=FallbackRationale(chat) if chat is not None else TemplateRationale(),
         sleep=(lambda _seconds: None) if config.testing else time.sleep,
         notifications=notifications,

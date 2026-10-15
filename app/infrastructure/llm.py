@@ -1,4 +1,4 @@
-"""LLM calls used only for travel safety and the rationale text.
+"""LLM calls used for travel safety, offer fit, and the rationale text.
 
 The numeric score is computed in ``app.domain.matching`` and is not read back
 from the model. A failure here falls back to the template rationale.
@@ -9,10 +9,11 @@ import urllib.request
 from typing import Protocol
 
 
-# A local model such as phi3 needs longer than a hosted API, and it will keep
-# generating unless the length is capped. 256 tokens is enough for the JSON
-# safety flag and for two short Hebrew sentences.
-LLM_TIMEOUT_SECONDS = 90.0
+# A local model on CPU will keep generating unless the length is capped.
+# 256 tokens is enough for the JSON safety flag and for two short Hebrew
+# sentences. The supervisor's tool-calling model uses its own higher cap
+# (``SUPERVISOR_NUM_PREDICT`` in ``agent/graph.py``) so tool calls are not truncated.
+LLM_TIMEOUT_SECONDS = 300.0
 OLLAMA_NUM_PREDICT = 256
 
 
@@ -80,6 +81,22 @@ def unsafe_travel(client: LlmClient, evidence: str) -> bool:
     )
     data = json.loads(_json_object(raw))
     return bool(data.get("unsafe_travel"))
+
+
+def refuses_request(client: LlmClient, request_text: str, offer: str) -> bool:
+    raw = client.complete(
+        'Reply with JSON only: {"refuses": true} or {"refuses": false}. '
+        "Use true only when the volunteer text explicitly says they do not do, "
+        "cannot do, or are not willing to do what the request needs. "
+        "A volunteer who does not mention the subject is false.\n"
+        "Request:\n"
+        + request_text[:2000]
+        + "\nVolunteer:\n"
+        + offer[:2000],
+        timeout=LLM_TIMEOUT_SECONDS,
+    )
+    data = json.loads(_json_object(raw))
+    return bool(data.get("refuses"))
 
 
 def _json_object(raw: str) -> str:

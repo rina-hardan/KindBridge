@@ -306,6 +306,37 @@ def test_a_refresh_emails_the_admin_only_when_the_volunteers_change(engine, cloc
         "הצעת ההתאמה עודכנה וממתינה לבדיקה",
     ]
     assert fake.sent[1].body.index("Avi Closer") < fake.sent[1].body.index("Noa Strong")
+    assert "מתאימות יותר" in fake.sent[1].body
+
+
+def test_a_match_found_after_no_match_says_a_match_was_found(engine, clock):
+    fake = FakeNotifier()
+    requester, request_id = uuid4(), uuid4()
+    with engine.begin() as conn:
+        _user(conn, requester, "requester@example.com")
+        _admin(conn)
+        user_id, profile = _volunteer(conn)
+        _name(conn, user_id, "Noa Strong")
+    _open_request(engine, request_id, requester)
+    catalog = Catalog([])
+    handler = _match_handler(engine, clock, catalog, _service(engine, fake))
+
+    _propose_match(handler, request_id)
+    with engine.connect() as conn:
+        attempt = conn.execute(
+            select(help_requests.c.match_attempt).where(help_requests.c.id == request_id)
+        ).scalar_one()
+    catalog.hits = [_hit(profile, 0.9)]
+    found = _propose_match(handler, request_id, attempt)
+
+    assert found.outcome == "proposed"
+    assert [mail.subject for mail in fake.sent] == [
+        "לא נמצאה התאמה לבקשה, נדרשת בדיקה",
+        "כעת נמצאה התאמה וממתינה לבדיקה",
+    ]
+    assert "הסוכן מצא כעת התאמה" in fake.sent[1].body
+    assert "מתאימות יותר" not in fake.sent[1].body
+    assert "Noa Strong" in fake.sent[1].body
 
 
 def test_a_second_poll_of_the_same_attempt_does_not_email_again(engine, clock):

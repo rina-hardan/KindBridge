@@ -1,11 +1,11 @@
 """ProposeMatchCommand. The agent writes proposals only through this command.
 
 Flow for one request and one match_attempt:
-embed the request, retrieve 15 résumés, hard-filter that set, then score it.
+embed the request, retrieve 15 résumés, hard-filter that set, drop an explicit refusal, then score it.
 The numeric score is deterministic. The command appends MatchesProposed or
 NoMatchFound and does not approve or assign. A request that already has a
-proposal is scored again; a new event is written only when the ordered
-volunteers change.
+proposal, and a request that found none, are scored again the same way; a new
+event is written only when the ordered volunteers change.
 """
 
 import logging
@@ -44,9 +44,8 @@ from app.domain.matching import (
     render_rationale,
     request_query_text,
     score_candidate,
-    skill_overlap,
 )
-from app.infrastructure.llm import LLM_TIMEOUT_SECONDS, unsafe_travel
+from app.infrastructure.llm import LLM_TIMEOUT_SECONDS, refuses_request, unsafe_travel
 from app.infrastructure.notification_service import NoNotifications, Notifications
 from app.infrastructure.vector_store import EmbeddingFailed, ResumeHit, ResumeVectorStore, VectorStoreUnavailable
 from app.projections.match_projector import MatchProjector
@@ -60,6 +59,7 @@ PIPELINE = (
     "load",
     "retrieve",
     "hard_filter",
+    "fit",
     "capacity",
     "travel",
     "web",
@@ -93,6 +93,7 @@ class _Candidate:
     similarity: float
     feasibility: float = 1.0
     travel_note: str = ""
+    offer: str = ""
 
 
 @dataclass
@@ -120,6 +121,10 @@ class WebSearch(Protocol):
 
 class TravelSafety(Protocol):
     def unsafe(self, evidence: str) -> bool: ...
+
+
+class OfferFit(Protocol):
+    def refuses(self, request_text: str, offer: str) -> bool: ...
 
 
 class RationaleWriter(Protocol):
@@ -179,6 +184,14 @@ class _LlmSafety:
         return unsafe_travel(self._client, evidence)
 
 
+class _LlmFit:
+    def __init__(self, client) -> None:
+        self._client = client
+
+    def refuses(self, request_text: str, offer: str) -> bool:
+        return refuses_request(self._client, request_text, offer)
+
+
 class MatchCommandHandlers:
     def __init__(
         self,
@@ -190,6 +203,7 @@ class MatchCommandHandlers:
         clock: Clock = utc_now,
         web: WebSearch | None = None,
         safety: TravelSafety | None = None,
+        fit: OfferFit | None = None,
         rationale: RationaleWriter | None = None,
         sleep: Callable[[float], None] | None = None,
         retrieval_attempts: int = _RETRIEVAL_ATTEMPTS,
@@ -204,6 +218,7 @@ class MatchCommandHandlers:
         self._clock = clock
         self._web = web
         self._safety = safety
+        self._fit = fit
         self._rationale = rationale or TemplateRationale()
         self._sleep = sleep or (lambda _seconds: None)
         self._retrieval_attempts = retrieval_attempts
@@ -355,8 +370,27 @@ class MatchCommandHandlers:
             if reason is not None:
                 work.rejections.append(reason)
                 continue
-            work.candidates.append(_Candidate(volunteer=volunteer, similarity=_unit(hit.similarity)))
+            work.candidates.append(
+                _Candidate(volunteer=volunteer, similarity=_unit(hit.similarity), offer=hit.document)
+            )
         work.candidates = _one_profile_per_person(work.candidates)
+
+    def fit(self, work: MatchWork) -> None:
+        if work.stop or not work.candidates or self._fit is None:
+            return
+        kept: list[_Candidate] = []
+        for candidate in work.candidates:
+            try:
+                refused = bool(self._fit.refuses(work.query_text, candidate.offer))
+            except Exception:
+                logger.exception("llm_fit_failed")
+                kept.append(candidate)
+                continue
+            if refused:
+                work.rejections.append("offer_mismatch")
+                continue
+            kept.append(candidate)
+        work.candidates = kept
 
     def capacity(self, work: MatchWork) -> None:
         if work.stop or not work.candidates:
@@ -439,7 +473,6 @@ class MatchCommandHandlers:
             volunteer = candidate.volunteer
             score, parts = score_candidate(
                 similarity=candidate.similarity,
-                skills=skill_overlap(view.required_skills, volunteer.skills),
                 travel_feasibility=candidate.feasibility,
                 urgency=view.urgency,
                 has_vehicle_fit=not view.requires_vehicle or volunteer.has_vehicle,
@@ -460,7 +493,7 @@ class MatchCommandHandlers:
                 for candidate, score, _parts in prepared
             ]
         )
-        refreshing = request.status == "MATCH_PROPOSED"
+        refreshing = request.status in ("MATCH_PROPOSED", "NO_MATCH")
         if refreshing and not _proposal_changed(request, ranked):
             work.outcome = "unchanged"
             return
@@ -524,6 +557,7 @@ class MatchCommandHandlers:
                         "match_attempt": work.command.match_attempt,
                         "k": min(PROPOSAL_LIMIT, len(chosen)),
                         **({"updated": True} if refreshing else {}),
+                        **({"found": True} if request.status == "NO_MATCH" else {}),
                     },
                 )
             )
