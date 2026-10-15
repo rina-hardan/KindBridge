@@ -32,6 +32,7 @@ The LLM only interprets Tavily results and writes the match rationale. Scores ar
 | [docs/ui-ux.md](docs/ui-ux.md) | Screens mapped to course 4.1-4.5 |
 | [docs/test-plan.md](docs/test-plan.md) | Endpoint and edge-case tests |
 | [docs/rules-and-skills.md](docs/rules-and-skills.md) | Skills.sh Flask skill, custom skill, Cursor rule |
+| [docs/course-requirements.pdf](docs/course-requirements.pdf) | Course assignment brief |
 
 Authoritative folder layout: [docs/architecture.md](docs/architecture.md) section 2.
 
@@ -87,4 +88,5 @@ pytest
 
 ## Team
 
-_TODO: add team members._
+Rina Zimer
+Dvora Ester Chaikin

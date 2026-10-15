@@ -14,8 +14,12 @@ __pycache__/
 .coverage
 htmlcov/
 
-# Vector DB data
+# Vector DB data (runtime directory; do not commit local Chroma files)
 chroma_data/
+test_chroma_db/
+
+# Scratch databases left by local UI checks
+_tmp_*.db
 
 # Node (npx skills add / MCP tooling)
 node_modules/

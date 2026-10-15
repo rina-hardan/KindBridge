@@ -91,35 +91,60 @@ Background agent process
 app/
   __init__.py                 # Flask factory
   config.py                   # reads environment variables
+  i18n.py                     # Hebrew/English labels
   controllers/                # Flask blueprints (MVC controllers)
     auth_controller.py
+    account_controller.py     # /me, requester, volunteer, tasks
     requests_controller.py
     admin_controller.py
-    volunteer_controller.py
-  commands/                   # CQRS write side
+    errors.py
+  commands/                   # CQRS write side, one file per aggregate
     bus.py                    # command bus (used by Flask and the agent)
     dtos.py
-    user_commands.py
+    user_commands.py          # register, login, account, requester, volunteer profile
     request_commands.py
-    volunteer_commands.py
+    match_commands.py
+    exemption_commands.py
   queries/                    # CQRS read side
+    account_queries.py
     request_queries.py
-    admin_queries.py
     volunteer_queries.py
-  domain/                     # model layer
+    admin_queries.py
+    admin_volunteer_queries.py
+  domain/                     # model layer; no Flask, SQL, or Chroma
     aggregates.py
     events.py
     errors.py
+    matching.py
+    requests.py
+    roles.py
+    bilingual.py
   projections/
     projectors.py
+    match_projector.py
+    exemption_projector.py
     rebuild.py                # python -m app.projections.rebuild
-  repositories/               # interfaces + SQL Server implementation
+  repositories/               # SQL Server behind interfaces
     event_store.py
-  infrastructure/             # shared by Flask and agent
+    db.py
+    tables.py
+    users.py
+    requests.py
+    request_read.py
+    matching.py
+    volunteer_tasks.py
+    admin_read.py
+    login_attempts.py
+  infrastructure/             # shared by Flask and the agent
     vector_store.py           # Chroma client (HTTP)
     embeddings.py
-  security/                   # JWT, CSRF, bcrypt
-  templates/                  # Jinja views
+    llm.py
+    web_search.py
+    notifier.py
+    notifications.py
+    notification_service.py
+  security/                   # JWT, CSRF, bcrypt, field encryption
+  templates/                  # Jinja views: auth, account, requests, admin
   static/
 agent/
   __init__.py
@@ -134,12 +159,18 @@ mcp_tools/                    # MCP Studio server (stdio)
 db/
   schema.sql                  # create event_store + projections; does not drop
   reset_local.sql             # local wipe, including event_store
-  seed.py                     # first admin + demo data
+  seed.py                     # first admin
+  seed_demo_people.py
+  init_db.py
+  check_db.py
+scripts/                      # one-off CLIs: python -m scripts.gmail_auth
 tests/
 docs/
 .cursor/
   rules/                      # kindbridge-cqrs.mdc
   skills/                     # volunteer-semantic-matching/SKILL.md
+.agents/
+  skills/flask/               # Skills.sh Flask skill
 requirements.txt
 .env.example
 .gitignore

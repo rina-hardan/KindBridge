@@ -11,10 +11,11 @@ Canonical product name: **KindBridge**. Ignore older "AidSync" wording.
 | [ui-ux.md](ui-ux.md) | Screens mapped to course 4.1-4.5 |
 | [test-plan.md](test-plan.md) | Endpoint and edge-case tests |
 | [rules-and-skills.md](rules-and-skills.md) | Skills.sh Flask skill, custom skill, Cursor rule |
+| [course-requirements.pdf](course-requirements.pdf) | Course assignment brief (requirements only; the spec above is the implementation) |
 
 ## Project structure
 
-The authoritative folder layout (`app/`, `agent/`, `mcp_tools/`, `db/`, `tests/`, `.cursor/`) is defined in [architecture.md](architecture.md), section 2 "Folder layout". The coding agent must create and place files exactly as described there.
+The authoritative folder layout (`app/`, `agent/`, `mcp_tools/`, `db/`, `scripts/`, `tests/`, `docs/`, `.cursor/`, `.agents/`) is defined in [architecture.md](architecture.md), section 2 "Folder layout". The coding agent must create and place files exactly as described there.
 
 ## Agent configuration
 
