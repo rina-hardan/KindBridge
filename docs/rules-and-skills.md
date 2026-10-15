@@ -11,7 +11,7 @@ Course NFR 3: at least one project Skill and one Rule.
 npx skills add https://github.com/terminalskills/skills --skill flask
 ```
 
-Installed at: `<FILL IN the folder the command created, for example .agents/skills/flask or .cursor/skills/flask>`.
+Installed at: [`.agents/skills/flask`](../.agents/skills/flask/SKILL.md).
 
 Use it when scaffolding Flask blueprints, app factory, and tests. It is **not** a volunteer-matching skill; matching is the custom skill below.
 

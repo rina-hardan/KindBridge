@@ -41,7 +41,7 @@ Authoritative folder layout: [docs/architecture.md](docs/architecture.md) sectio
 | :--- | :--- |
 | Project rule | [`.cursor/rules/kindbridge-cqrs.mdc`](.cursor/rules/kindbridge-cqrs.mdc) |
 | Custom skill | [`.cursor/skills/volunteer-semantic-matching/SKILL.md`](.cursor/skills/volunteer-semantic-matching/SKILL.md) |
-| Imported skill | `npx skills add https://github.com/terminalskills/skills --skill flask` (installed at `<FILL IN path>`) |
+| Imported skill | [`.agents/skills/flask`](.agents/skills/flask/SKILL.md) (`npx skills add https://github.com/terminalskills/skills --skill flask`) |
 
 ## Local run
 

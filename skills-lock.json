@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "flask": {
+      "source": "terminalskills/skills",
+      "sourceType": "github",
+      "skillPath": "skills/flask/SKILL.md",
+      "computedHash": "3fb98ed709c628091bdb905710ef047f9abf69ceae742b7c719d0723145f45eb"
+    }
+  }
+}
